@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#050505" />
+    <meta
+      name="description"
+      content="A 3D exploration of traditional dance poses and their movement dimensions."
+    />
+    <title>Remapping Tradition — Pose Space</title>
+  </head>
+  <body>
+    <main id="app">
+      <canvas id="scene" aria-label="Interactive 3D pose embedding"></canvas>
+
+      <button
+        class="settings-button"
+        id="settings-button"
+        type="button"
+        aria-controls="settings-panel"
+        aria-expanded="false"
+      >
+        <span class="settings-button__icon" aria-hidden="true">☷</span>
+        Settings
+      </button>
+
+      <button class="random-button" id="random-pose" type="button" disabled>
+        <span aria-hidden="true">↝</span>
+        Random dance
+      </button>
+
+      <aside class="settings-panel" id="settings-panel" aria-hidden="true">
+        <div class="settings-panel__header">
+          <div>
+            <p class="eyebrow">Pose space</p>
+            <h1>Settings</h1>
+          </div>
+          <button class="icon-button" id="close-settings" type="button" aria-label="Close settings">×</button>
+        </div>
+
+        <div class="settings-panel__body">
+          <section class="control-section">
+            <label class="control-label" for="display-mode">Display</label>
+            <select id="display-mode">
+              <option value="overlay">Body + diagram</option>
+              <option value="diagram">Diagram only</option>
+              <option value="body">Body only</option>
+            </select>
+            <label class="toggle-row" for="country-colors">
+              <span>Country color filter</span>
+              <input id="country-colors" type="checkbox" checked />
+            </label>
+            <label class="toggle-row" for="auto-rotate">
+              <span>Auto rotation</span>
+              <input id="auto-rotate" type="checkbox" checked />
+            </label>
+            <label class="toggle-row" for="pose-rotation">
+              <span>Rotate poses vertically</span>
+              <input id="pose-rotation" type="checkbox" />
+            </label>
+            <div class="rotation-speed-control">
+              <div class="range-heading">
+                <label class="control-label" for="rotation-speed">Vertical rotation speed</label>
+                <output id="rotation-speed-value" for="rotation-speed">3°/s</output>
+              </div>
+              <input
+                id="rotation-speed"
+                type="range"
+                min="0.5"
+                max="720"
+                value="3"
+                step="0.5"
+                disabled
+              />
+            </div>
+            <label class="toggle-row" for="show-pose-labels">
+              <span>Pose names</span>
+              <input id="show-pose-labels" type="checkbox" checked />
+            </label>
+            <div class="pose-label-size-control">
+              <div class="range-heading">
+                <label class="control-label" for="pose-label-size">Pose name size</label>
+                <output id="pose-label-size-value" for="pose-label-size">1.00×</output>
+              </div>
+              <input
+                id="pose-label-size"
+                type="range"
+                min="0.4"
+                max="2.5"
+                value="1"
+                step="0.05"
+              />
+            </div>
+            <button class="scene-button" id="play-opening" type="button" disabled>
+              <span aria-hidden="true">▶</span>
+              Play opening scene
+            </button>
+          </section>
+
+          <section class="control-section">
+            <div class="range-heading">
+              <label class="control-label" for="image-scale">Pose scale</label>
+              <output id="image-scale-value" for="image-scale">0.90×</output>
+            </div>
+            <input id="image-scale" type="range" min="0.35" max="1.8" value="0.9" step="0.05" />
+
+            <div class="range-heading range-heading--spaced">
+              <label class="control-label" for="space-scale">Space</label>
+              <output id="space-scale-value" for="space-scale">1.15×</output>
+            </div>
+            <input id="space-scale" type="range" min="0.6" max="2.4" value="1.15" step="0.05" />
+          </section>
+
+          <section class="control-section">
+            <div class="section-heading">
+              <span class="control-label">Dimension connections</span>
+              <label class="compact-toggle" for="show-lines">
+                <span>All</span>
+                <input id="show-lines" type="checkbox" checked />
+              </label>
+            </div>
+            <div class="connection-controls">
+              <label class="control-label" for="line-style">Path</label>
+              <select id="line-style">
+                <option value="curved" selected>Curved</option>
+                <option value="straight">Straight</option>
+              </select>
+              <div class="range-heading range-heading--spaced">
+                <label class="control-label" for="line-opacity">Line opacity</label>
+                <output id="line-opacity-value" for="line-opacity">6%</output>
+              </div>
+              <input id="line-opacity" type="range" min="0" max="0.25" value="0.055" step="0.005" />
+            </div>
+            <div class="check-list" id="dimension-list"></div>
+          </section>
+
+          <section class="control-section">
+            <div class="section-heading">
+              <span class="control-label">Countries</span>
+              <button class="text-button" id="toggle-countries" type="button">Hide all</button>
+            </div>
+            <div class="check-list" id="country-list"></div>
+          </section>
+
+          <p class="interaction-hint">Drag to rotate · Scroll to zoom · Hover for scores</p>
+        </div>
+      </aside>
+
+      <aside class="explore-panel" id="explore-panel" aria-hidden="true">
+        <div class="explore-panel__header">
+          <div>
+            <p class="eyebrow">Selected dance</p>
+            <h2 id="selected-pose-name">—</h2>
+          </div>
+          <button
+            class="explore-close"
+            id="close-explore"
+            type="button"
+            aria-label="Close dance exploration"
+          >×</button>
+        </div>
+        <p class="explore-status" id="explore-status">Choose how to compare this dance.</p>
+        <div class="explore-actions" aria-label="Dance comparison options">
+          <button type="button" data-comparison="similar">
+            <span>Similar</span>
+            <small>Closest across all dances</small>
+          </button>
+          <button type="button" data-comparison="different">
+            <span>Most different</span>
+            <small>Farthest across all dances</small>
+          </button>
+          <button type="button" data-comparison="similar-all-countries">
+            <span>Similar · all countries</span>
+            <small>One closest from each country</small>
+          </button>
+          <button type="button" data-comparison="different-all-countries">
+            <span>Most different · all countries</span>
+            <small>One farthest from each country</small>
+          </button>
+          <button type="button" data-comparison="similar-same-country">
+            <span>Similar · same country</span>
+            <small>Closest within the selected country</small>
+          </button>
+          <button type="button" data-comparison="different-same-country">
+            <span>Most different · same country</span>
+            <small>Farthest within the selected country</small>
+          </button>
+        </div>
+      </aside>
+
+      <div class="loading" id="loading" role="status" aria-live="polite">
+        <span class="loading__dot"></span>
+        <span id="loading-label">Mapping poses…</span>
+      </div>
+
+      <div class="tooltip" id="tooltip" aria-hidden="true"></div>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
