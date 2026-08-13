@@ -7,6 +7,9 @@ const settingsButton = document.querySelector("#settings-button");
 const settingsPanel = document.querySelector("#settings-panel");
 const closeSettingsButton = document.querySelector("#close-settings");
 const displayModeInput = document.querySelector("#display-mode");
+const diagramOverlayInput = document.querySelector("#diagram-overlay-opacity");
+const diagramOverlayValue = document.querySelector("#diagram-overlay-opacity-value");
+const diagramOverlayControl = document.querySelector(".diagram-overlay-control");
 const countryColorsInput = document.querySelector("#country-colors");
 const autoRotateInput = document.querySelector("#auto-rotate");
 const poseRotationInput = document.querySelector("#pose-rotation");
@@ -36,6 +39,11 @@ const closeExploreButton = document.querySelector("#close-explore");
 const selectedPoseName = document.querySelector("#selected-pose-name");
 const exploreStatus = document.querySelector("#explore-status");
 const exploreDisplayModeInput = document.querySelector("#explore-display-mode");
+const exploreDiagramOverlayInput = document.querySelector("#explore-diagram-overlay-opacity");
+const exploreDiagramOverlayValue = document.querySelector(
+  "#explore-diagram-overlay-opacity-value",
+);
+const exploreDiagramOverlayControl = document.querySelector(".explore-overlay-control");
 const comparisonButtons = [...document.querySelectorAll("[data-comparison]")];
 
 const baseUrl = import.meta.env.BASE_URL;
@@ -47,7 +55,8 @@ const modeLabels = {
 };
 
 const state = {
-  mode: "overlay",
+  mode: "bodyTransparent",
+  diagramOverlayOpacity: Number(diagramOverlayInput.value) / 100,
   poseScale: Number(imageScaleInput.value),
   spaceScale: Number(spaceScaleInput.value),
   countryColors: countryColorsInput.checked,
@@ -238,6 +247,23 @@ function createPoseObject(pose) {
   image.renderOrder = 1;
   image.userData.pose = pose;
   image.userData.poseGroup = group;
+  const diagramOverlay = new THREE.Mesh(
+    posePlaneGeometry,
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0,
+      alphaTest: 0.005,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+      toneMapped: false,
+    }),
+  );
+  diagramOverlay.position.z = 0.002;
+  diagramOverlay.renderOrder = 2;
+  image.add(diagramOverlay);
   billboard.add(image);
 
   const poseLabelText = `${pose.countryLabel} · ${pose.number}`;
@@ -258,6 +284,7 @@ function createPoseObject(pose) {
   group.add(billboard, poseLabel);
   group.userData.billboard = billboard;
   group.userData.image = image;
+  group.userData.diagramOverlay = diagramOverlay;
   group.userData.label = poseLabel;
   group.userData.labelText = poseLabelText;
   poseRoot.add(group);
@@ -311,11 +338,45 @@ function updatePoseAppearance(group) {
   material.opacity = material.map ? group.userData.visualOpacity : 0;
   material.needsUpdate = true;
 
+  const diagramMaterial = group.userData.diagramOverlay.material;
+  const diagramColor = state.countryColors
+    ? new THREE.Color(payload.countryColors[pose.country]).offsetHSL(0, 0.24, 0.03)
+    : new THREE.Color(1, 1, 1);
+  diagramMaterial.color.copy(diagramColor.multiplyScalar(2.8));
+  diagramMaterial.opacity =
+    state.mode === "bodyTransparent" && diagramMaterial.map
+      ? state.diagramOverlayOpacity * group.userData.visualOpacity
+      : 0;
+  diagramMaterial.needsUpdate = true;
+
   const labelColor = state.countryColors
     ? new THREE.Color(payload.countryColors[pose.country]).offsetHSL(0, 0.04, 0.22)
     : new THREE.Color(0xf2f2ed);
   group.userData.label.material.color.copy(labelColor);
   group.userData.label.material.needsUpdate = true;
+}
+
+function updateDiagramOverlayControls() {
+  const enabled = state.mode === "bodyTransparent";
+  diagramOverlayInput.disabled = !enabled;
+  exploreDiagramOverlayInput.disabled = !enabled;
+  diagramOverlayControl.classList.toggle("is-disabled", !enabled);
+  exploreDiagramOverlayControl.classList.toggle("is-disabled", !enabled);
+}
+
+function setDiagramOverlayOpacity(percent) {
+  const boundedPercent = Math.min(100, Math.max(0, Number(percent)));
+  state.diagramOverlayOpacity = boundedPercent / 100;
+  diagramOverlayInput.value = String(boundedPercent);
+  exploreDiagramOverlayInput.value = String(boundedPercent);
+  diagramOverlayValue.value = `${Math.round(boundedPercent)}%`;
+  exploreDiagramOverlayValue.value = `${Math.round(boundedPercent)}%`;
+  poseObjects.forEach((group) => {
+    group.userData.diagramOverlay.material.opacity =
+      state.mode === "bodyTransparent" && group.userData.diagramOverlay.material.map
+        ? state.diagramOverlayOpacity * group.userData.visualOpacity
+        : 0;
+  });
 }
 
 function updatePoseLabelVisibility() {
@@ -557,6 +618,7 @@ function setPoseProminence(group, level = 0) {
   group.userData.image.renderOrder = level === 2 ? 11 : level === 1 ? 10 : 1;
   group.userData.image.material.depthTest = level === 0;
   group.userData.image.material.needsUpdate = true;
+  group.userData.diagramOverlay.renderOrder = level === 2 ? 12 : level === 1 ? 11 : 2;
   group.userData.label.renderOrder = level === 2 ? 14 : level === 1 ? 13 : 4;
 }
 
@@ -579,6 +641,10 @@ function updatePoseTransitions(deltaSeconds) {
     group.userData.image.material.opacity = group.userData.image.material.map
       ? group.userData.visualOpacity
       : 0;
+    group.userData.diagramOverlay.material.opacity =
+      state.mode === "bodyTransparent" && group.userData.diagramOverlay.material.map
+        ? group.userData.visualOpacity * state.diagramOverlayOpacity
+        : 0;
     group.userData.label.material.opacity = state.poseLabels
       ? group.userData.visualOpacity * 0.86
       : 0;
@@ -838,6 +904,12 @@ function exitExploration() {
         group.scale.setScalar(1);
         group.visible = countryVisible;
         group.userData.image.material.opacity = countryVisible && group.userData.image.material.map ? 1 : 0;
+        group.userData.diagramOverlay.material.opacity =
+          countryVisible &&
+          state.mode === "bodyTransparent" &&
+          group.userData.diagramOverlay.material.map
+            ? state.diagramOverlayOpacity
+            : 0;
         group.userData.label.material.opacity = countryVisible && state.poseLabels ? 0.86 : 0;
       });
     },
@@ -898,6 +970,7 @@ function startOpeningScene() {
     group.scale.setScalar(0.001);
     group.visible = false;
     group.userData.image.material.opacity = 0;
+    group.userData.diagramOverlay.material.opacity = 0;
     group.userData.label.material.opacity = 0;
   });
   lineRoot.visible = state.linesVisible;
@@ -918,6 +991,10 @@ function finishOpeningScene() {
     group.scale.setScalar(1);
     group.visible = state.visibleCountries.has(group.userData.pose.country);
     group.userData.image.material.opacity = group.userData.image.material.map ? 1 : 0;
+    group.userData.diagramOverlay.material.opacity =
+      state.mode === "bodyTransparent" && group.userData.diagramOverlay.material.map
+        ? state.diagramOverlayOpacity
+        : 0;
     group.userData.label.material.opacity = state.poseLabels ? 0.86 : 0;
   });
   lineRoot.visible = state.linesVisible;
@@ -957,6 +1034,10 @@ function updateOpeningScene(time) {
     group.visible = countryVisible && localProgress > 0.001;
     group.scale.setScalar(Math.max(localProgress, 0.001));
     group.userData.image.material.opacity = localProgress;
+    group.userData.diagramOverlay.material.opacity =
+      state.mode === "bodyTransparent" && group.userData.diagramOverlay.material.map
+        ? localProgress * state.diagramOverlayOpacity
+        : 0;
     group.userData.label.material.opacity = state.poseLabels ? localProgress * 0.86 : 0;
     opening.revealWeights[index] = countryVisible ? localProgress : 0;
   });
@@ -1103,12 +1184,16 @@ async function loadPoseMode(mode) {
   state.mode = mode;
   displayModeInput.value = mode;
   exploreDisplayModeInput.value = mode;
+  updateDiagramOverlayControls();
   setLoading(`Loading ${modeLabels[mode]}…`, 0);
 
   poseObjects.forEach((group) => {
     group.userData.image.material.map = null;
     group.userData.image.material.opacity = 0;
     group.userData.image.material.needsUpdate = true;
+    group.userData.diagramOverlay.material.map = null;
+    group.userData.diagramOverlay.material.opacity = 0;
+    group.userData.diagramOverlay.material.needsUpdate = true;
     updatePoseScale(group);
     updatePoseAppearance(group);
   });
@@ -1126,13 +1211,26 @@ async function loadPoseMode(mode) {
       const group = poseObjects[index];
       const pose = group.userData.pose;
       try {
-        const texture = await loadTexture(pose.assets[mode], mode);
+        const textureRequests = [loadTexture(pose.assets[mode], mode)];
+        if (mode === "bodyTransparent") {
+          textureRequests.push(loadTexture(pose.assets.diagram, "diagram"));
+        }
+        const results = await Promise.allSettled(textureRequests);
+        const textures = results
+          .filter((result) => result.status === "fulfilled")
+          .map((result) => result.value);
         if (generation !== textureGeneration) {
-          texture.dispose();
+          textures.forEach((texture) => texture.dispose());
           return;
         }
-        loadedTextures.push(texture);
-        group.userData.image.material.map = texture;
+        loadedTextures.push(...textures);
+        if (results[0].status === "rejected") throw results[0].reason;
+        group.userData.image.material.map = results[0].value;
+        if (mode === "bodyTransparent" && results[1]?.status === "fulfilled") {
+          group.userData.diagramOverlay.material.map = results[1].value;
+        } else if (results[1]?.status === "rejected") {
+          console.warn(`Could not load diagram overlay for ${pose.id}`, results[1].reason);
+        }
         updatePoseAppearance(group);
       } catch (error) {
         console.error(`Could not load ${pose.id} (${mode})`, error);
@@ -1224,6 +1322,12 @@ function bindEvents() {
   exploreDisplayModeInput.addEventListener("change", () =>
     loadPoseMode(exploreDisplayModeInput.value),
   );
+  diagramOverlayInput.addEventListener("input", () => {
+    setDiagramOverlayOpacity(diagramOverlayInput.value);
+  });
+  exploreDiagramOverlayInput.addEventListener("input", () => {
+    setDiagramOverlayOpacity(exploreDiagramOverlayInput.value);
+  });
   countryColorsInput.addEventListener("change", () => {
     state.countryColors = countryColorsInput.checked;
     updateCountryColors();
@@ -1331,6 +1435,8 @@ async function initialize() {
     updateSpatialLayout();
     updateCountryColors();
     bindEvents();
+    updateDiagramOverlayControls();
+    setDiagramOverlayOpacity(diagramOverlayInput.value);
     await loadPoseMode(state.mode);
     poseObjects.forEach((group) => {
       group.userData.label.material.opacity = state.poseLabels ? 0.86 : 0;

@@ -43,11 +43,25 @@
           <section class="control-section">
             <label class="control-label" for="display-mode">Display</label>
             <select id="display-mode">
+              <option value="bodyTransparent" selected>Body Transparent</option>
               <option value="overlay">Body + diagram</option>
               <option value="diagram">Diagram only</option>
               <option value="body">Body only</option>
-              <option value="bodyTransparent">Body Transparent</option>
             </select>
+            <div class="diagram-overlay-control">
+              <div class="range-heading">
+                <label class="control-label" for="diagram-overlay-opacity">Diagram overlay</label>
+                <output id="diagram-overlay-opacity-value" for="diagram-overlay-opacity">50%</output>
+              </div>
+              <input
+                id="diagram-overlay-opacity"
+                type="range"
+                min="0"
+                max="100"
+                value="50"
+                step="1"
+              />
+            </div>
             <label class="toggle-row" for="country-colors">
               <span>Country color filter</span>
               <input id="country-colors" type="checkbox" checked />
@@ -165,12 +179,29 @@
         <label class="explore-view" for="explore-display-mode">
           <span>View</span>
           <select id="explore-display-mode">
+            <option value="bodyTransparent" selected>Body Transparent</option>
             <option value="body">Image</option>
-            <option value="overlay" selected>Image + diagram</option>
+            <option value="overlay">Image + diagram</option>
             <option value="diagram">Diagram</option>
-            <option value="bodyTransparent">Body Transparent</option>
           </select>
         </label>
+        <div class="explore-overlay-control">
+          <div class="range-heading">
+            <label for="explore-diagram-overlay-opacity">Diagram overlay</label>
+            <output
+              id="explore-diagram-overlay-opacity-value"
+              for="explore-diagram-overlay-opacity"
+            >50%</output>
+          </div>
+          <input
+            id="explore-diagram-overlay-opacity"
+            type="range"
+            min="0"
+            max="100"
+            value="50"
+            step="1"
+          />
+        </div>
         <div class="explore-actions" aria-label="Dance comparison options">
           <button type="button" data-comparison="similar">
             <span>Similar</span>
