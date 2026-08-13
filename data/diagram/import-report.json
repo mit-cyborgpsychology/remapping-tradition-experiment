@@ -1,0 +1,63 @@
+{
+  "source": "/Users/patpataranutaporn/Desktop/Diagram Remapping",
+  "destination": "/Users/patpataranutaporn/Github/remapping-tradition-experiment/data/diagram",
+  "asset_count": 876,
+  "country_count": 9,
+  "counts": {
+    "Brunei_Darussalam": {
+      "Body": 7,
+      "Body_with_Diagram": 7,
+      "Transparent_Diagram": 7
+    },
+    "Indonesia": {
+      "Body": 57,
+      "Body_with_Diagram": 57,
+      "Transparent_Diagram": 57
+    },
+    "Laos": {
+      "Body": 19,
+      "Body_with_Diagram": 19,
+      "Transparent_Diagram": 19
+    },
+    "Malaysia": {
+      "Body": 43,
+      "Body_with_Diagram": 41,
+      "Transparent_Diagram": 41
+    },
+    "Myanmar": {
+      "Body": 63,
+      "Body_with_Diagram": 63,
+      "Transparent_Diagram": 63
+    },
+    "Philippines": {
+      "Body": 21,
+      "Body_with_Diagram": 21,
+      "Transparent_Diagram": 21
+    },
+    "Singapore": {
+      "Body": 16,
+      "Body_with_Diagram": 16,
+      "Body_with_Diagram_Greyscale": 16,
+      "Transparent_Diagram": 16
+    },
+    "Thailand": {
+      "Body": 30,
+      "Body_with_Diagram": 30,
+      "Transparent_Diagram": 30
+    },
+    "Vietnam": {
+      "Body": 32,
+      "Body_with_Diagram": 32,
+      "Transparent_Diagram": 32
+    }
+  },
+  "notes": [
+    "macOS .DS_Store metadata files were intentionally excluded.",
+    "Thailand (monkey) was normalized to the country name Thailand.",
+    "Myanmar compound source labels were natural-sorted and renumbered 01-63.",
+    "Singapore source pose 11 is absent in every set; its remaining poses were renumbered 01-16 consistently.",
+    "Singapore Body/greyscale supplies Body; direct Body images are transparent line diagrams.",
+    "Singapore Greyscale and Diagram was retained as Body_with_Diagram_Greyscale so no asset was discarded.",
+    "Malaysia Body_with_Diagram and Transparent_Diagram are missing pose IDs 14 and 31; IDs were not shifted, preserving cross-type alignment."
+  ]
+}

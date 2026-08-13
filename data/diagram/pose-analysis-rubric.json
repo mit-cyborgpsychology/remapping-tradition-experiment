@@ -1,0 +1,16 @@
+{
+  "scale": "0-100 integer observational rating",
+  "review_source": "Body_with_Diagram image only",
+  "scoring_increment": 1,
+  "dimensions": {
+    "energy": "Visible dynamic effort, force, momentum, acceleration, and off-balance vitality. 0 is fully restful; 50 is clearly active but controlled; 100 is explosive or maximally vigorous.",
+    "circles_curves": "Size and prominence of circular pathways, arcs, and curved body or diagram lines. 0 is entirely compact/linear; 50 has medium curves; 100 is dominated by expansive full-body circles.",
+    "axis_points": "Visible limb-to-limb or limb-to-body contacts that create pivots or balance points. 0 has no contact; 50 has multiple clear contacts; 100 is extensively interlocked or contact-dense.",
+    "synchronous_limbs": "Bilateral symmetry and coordinated matching of limbs. 0 is maximally asymmetric; 50 has partial mirroring; 100 is near-perfect bilateral symmetry.",
+    "external_body_spaces": "Amount and size of negative space opened around and between the body and limbs. 0 is closed/compact; 50 has several moderate openings; 100 creates expansive external geometry.",
+    "shifting_relations": "Strength of a dominant body part, directional action, or focal emphasis. 0 distributes attention evenly; 50 has a moderate focal limb; 100 has one singular, extreme focal action.",
+    "jumping": "Visible airborne quality. 0 has stable grounded feet; 40 has one clearly lifted foot; 80 has both feet visibly airborne; 100 is a high or forceful jump.",
+    "emotion": "Visible facial and whole-body emotional expressivity. 0 is neutral or unreadable; 50 communicates clear expressive intent; 100 is extremely dramatic."
+  },
+  "interpretation_note": "Scores are image-based observational annotations of a still pose and its overlaid diagram, not measurements of an entire movement phrase or performer intent."
+}
