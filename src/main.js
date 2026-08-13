@@ -35,6 +35,7 @@ const explorePanel = document.querySelector("#explore-panel");
 const closeExploreButton = document.querySelector("#close-explore");
 const selectedPoseName = document.querySelector("#selected-pose-name");
 const exploreStatus = document.querySelector("#explore-status");
+const exploreDisplayModeInput = document.querySelector("#explore-display-mode");
 const comparisonButtons = [...document.querySelectorAll("[data-comparison]")];
 
 const baseUrl = import.meta.env.BASE_URL;
@@ -555,7 +556,8 @@ function setPoseProminence(group, level = 0) {
 
 function updatePoseTransitions(deltaSeconds) {
   if (!exploration.active && !exploration.restoring) return;
-  const response = 1 - Math.exp(-deltaSeconds * (reducedMotion ? 40 : 6.5));
+  const transitionSpeed = exploration.restoring ? 6.5 : 4.6;
+  const response = 1 - Math.exp(-deltaSeconds * (reducedMotion ? 40 : transitionSpeed));
   poseObjects.forEach((group) => {
     group.userData.visualOpacity = THREE.MathUtils.lerp(
       group.userData.visualOpacity,
@@ -645,8 +647,8 @@ function createComparisonLines(relatedGroups) {
 function updateComparisonLineAnimation(time) {
   if (!exploration.active || exploration.comparisonLines.length === 0) return;
   exploration.comparisonLines.forEach((line) => {
-    const delay = line.userData.animationIndex * 85;
-    const progress = smoothstep((time - exploration.lineAnimationStart - delay) / 620);
+    const delay = line.userData.animationIndex * 105;
+    const progress = smoothstep((time - exploration.lineAnimationStart - delay) / 900);
     const visiblePoints = progress <= 0
       ? 0
       : Math.max(2, Math.ceil(line.userData.pointCount * progress));
@@ -655,11 +657,11 @@ function updateComparisonLineAnimation(time) {
   });
 }
 
-function startCameraTween(endPosition, endTarget, onComplete = null) {
+function startCameraTween(endPosition, endTarget, onComplete = null, duration = 1250) {
   controls.enabled = false;
   exploration.cameraTween = {
     startTime: performance.now(),
-    duration: reducedMotion ? 80 : 850,
+    duration: reducedMotion ? 80 : duration,
     startPosition: camera.position.clone(),
     endPosition: endPosition.clone(),
     startTarget: controls.target.clone(),
@@ -736,6 +738,7 @@ function selectPose(group) {
   explorePanel.setAttribute("aria-hidden", "false");
   selectedPoseName.textContent = `${group.userData.pose.countryLabel} · Pose ${group.userData.pose.number}`;
   exploreStatus.textContent = "Choose how to compare this dance.";
+  exploreDisplayModeInput.value = state.mode;
 
   resetComparisonPresentation();
   poseObjects.forEach((poseGroup) => {
@@ -776,7 +779,11 @@ function applyComparison(mode) {
     const related = exploration.relatedGroups.has(group);
     const relevant = selected || related;
     const countryVisible = state.visibleCountries.has(group.userData.pose.country);
-    setPoseTarget(group, relevant ? 1 : countryVisible ? 0.025 : 0, relevant ? 1.5 : 0.92);
+    setPoseTarget(
+      group,
+      relevant ? 1 : countryVisible ? 0.025 : 0,
+      selected ? 1.5 : related ? 2 : 0.92,
+    );
     setPoseProminence(group, selected ? 2 : related ? 1 : 0);
   });
   lineRoot.visible = false;
@@ -828,6 +835,7 @@ function exitExploration() {
         group.userData.label.material.opacity = countryVisible && state.poseLabels ? 0.86 : 0;
       });
     },
+    850,
   );
 }
 
@@ -1087,6 +1095,8 @@ async function loadTexture(path, mode) {
 async function loadPoseMode(mode) {
   const generation = ++textureGeneration;
   state.mode = mode;
+  displayModeInput.value = mode;
+  exploreDisplayModeInput.value = mode;
   setLoading(`Loading ${modeLabels[mode]}…`, 0);
 
   poseObjects.forEach((group) => {
@@ -1205,6 +1215,9 @@ function bindEvents() {
   });
 
   displayModeInput.addEventListener("change", () => loadPoseMode(displayModeInput.value));
+  exploreDisplayModeInput.addEventListener("change", () =>
+    loadPoseMode(exploreDisplayModeInput.value),
+  );
   countryColorsInput.addEventListener("change", () => {
     state.countryColors = countryColorsInput.checked;
     updateCountryColors();

@@ -531,10 +531,28 @@ input[type="range"]::-webkit-slider-thumb {
 
 .explore-status {
   min-height: 16px;
-  margin: 12px 0 13px;
+  margin: 12px 0 10px;
   color: #82827d;
   font-size: 10px;
   line-height: 1.5;
+}
+
+.explore-view {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 13px;
+  color: #989893;
+  font-size: 10px;
+}
+
+.explore-view select {
+  height: 34px;
+  margin: 0;
+  padding-left: 10px;
+  border-radius: 9px;
+  font-size: 11px;
 }
 
 .explore-actions {
