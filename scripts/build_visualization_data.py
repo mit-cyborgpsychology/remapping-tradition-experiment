@@ -263,6 +263,7 @@ def build_pose_thumbnails(
     assets: dict[str, Path], pose_directory: Path
 ) -> tuple[tuple[int, int], tuple[int, int], tuple[int, int]]:
     body_path = pose_directory / "body.webp"
+    body_transparent_path = pose_directory / "body-transparent.png"
     overlay_path = pose_directory / "body-with-diagram.webp"
     diagram_path = pose_directory / "diagram.png"
     pose_directory.mkdir(parents=True, exist_ok=True)
@@ -282,6 +283,10 @@ def build_pose_thumbnails(
 
     if not body_path.exists():
         body.save(body_path, "WEBP", quality=86, method=4, exact=True)
+    if not body_transparent_path.exists():
+        raise FileNotFoundError(
+            f"Missing transparent body cutout: {body_transparent_path}"
+        )
     overlay.save(overlay_path, "WEBP", quality=90, method=4, exact=True)
     diagram.save(diagram_path, "PNG", compress_level=6)
     return body.size, overlay.size, diagram.size
@@ -388,11 +393,13 @@ def main() -> None:
                 "normalized": normalized_values,
                 "assets": {
                     "body": f"/data/poses/{country}/{number}/body.webp",
+                    "bodyTransparent": f"/data/poses/{country}/{number}/body-transparent.png",
                     "overlay": f"/data/poses/{country}/{number}/body-with-diagram.webp",
                     "diagram": f"/data/poses/{country}/{number}/diagram.png",
                 },
                 "aspect": {
                     "body": round(body_size[0] / body_size[1], 5),
+                    "bodyTransparent": round(body_size[0] / body_size[1], 5),
                     "overlay": round(overlay_size[0] / overlay_size[1], 5),
                     "diagram": round(diagram_size[0] / diagram_size[1], 5),
                 },

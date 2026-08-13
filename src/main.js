@@ -43,6 +43,7 @@ const modeLabels = {
   overlay: "body + diagram",
   diagram: "diagram",
   body: "body",
+  bodyTransparent: "transparent body",
 };
 
 const state = {
@@ -289,14 +290,19 @@ function updatePoseScale(group) {
 function updatePoseAppearance(group) {
   const pose = group.userData.pose;
   const material = group.userData.image.material;
-  const brightness = { body: 1.35, overlay: 1.75, diagram: 2.8 }[state.mode];
+  const brightness = {
+    body: 1.35,
+    bodyTransparent: 1.55,
+    overlay: 1.75,
+    diagram: 2.8,
+  }[state.mode];
   const color = state.countryColors
     ? new THREE.Color(payload.countryColors[pose.country])
     : new THREE.Color(1, 1, 1);
   if (state.countryColors) {
     color.offsetHSL(
       0,
-      state.mode === "body" ? 0.08 : 0.24,
+      state.mode === "body" || state.mode === "bodyTransparent" ? 0.08 : 0.24,
       state.mode === "diagram" ? 0.03 : 0,
     );
   }
