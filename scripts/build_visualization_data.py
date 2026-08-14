@@ -122,7 +122,10 @@ def write_csv_atomic(
     try:
         with handle:
             writer = csv.DictWriter(
-                handle, fieldnames=fieldnames, extrasaction="ignore"
+                handle,
+                fieldnames=fieldnames,
+                extrasaction="ignore",
+                lineterminator="\n",
             )
             writer.writeheader()
             writer.writerows(rows)

@@ -6,6 +6,7 @@ const canvas = document.querySelector("#scene");
 const settingsButton = document.querySelector("#settings-button");
 const settingsPanel = document.querySelector("#settings-panel");
 const closeSettingsButton = document.querySelector("#close-settings");
+const embeddingVersionInput = document.querySelector("#embedding-version");
 const displayModeInput = document.querySelector("#display-mode");
 const diagramOverlayInput = document.querySelector("#diagram-overlay-opacity");
 const diagramOverlayValue = document.querySelector("#diagram-overlay-opacity-value");
@@ -47,6 +48,11 @@ const exploreDiagramOverlayControl = document.querySelector(".explore-overlay-co
 const comparisonButtons = [...document.querySelectorAll("[data-comparison]")];
 
 const baseUrl = import.meta.env.BASE_URL;
+const embeddingFiles = {
+  v1: "data/embedding-v1.json",
+  v2: "data/embedding-v2.json",
+  v3: "data/embedding-v3.json",
+};
 const modeLabels = {
   overlay: "body + diagram",
   diagram: "diagram",
@@ -55,6 +61,7 @@ const modeLabels = {
 };
 
 const state = {
+  embeddingVersion: "v1",
   mode: "bodyTransparent",
   diagramOverlayOpacity: Number(diagramOverlayInput.value) / 100,
   poseScale: Number(imageScaleInput.value),
@@ -116,6 +123,7 @@ const lineMeshes = new Map();
 const countryInputs = new Map();
 const dimensionInputs = new Map();
 let payload;
+let embeddingGeneration = 0;
 let textureGeneration = 0;
 let activeTextures = [];
 let lastPoseRotationTime = null;
@@ -175,6 +183,82 @@ function hideLoading() {
 
 function resolveAssetUrl(path) {
   return `${baseUrl}${path.replace(/^\//, "")}`;
+}
+
+async function fetchEmbedding(version) {
+  const path = embeddingFiles[version];
+  if (!path) throw new Error(`Unknown embedding version: ${version}`);
+  const response = await fetch(`${baseUrl}${path}`);
+  if (!response.ok) {
+    throw new Error(`${version.toUpperCase()} embedding request failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+function applyEmbeddingPayload(nextPayload) {
+  if (nextPayload.poses.length !== poseObjects.length) {
+    throw new Error("Embedding versions contain different pose counts");
+  }
+  const nextPoses = new Map(nextPayload.poses.map((pose) => [pose.id, pose]));
+  const nextDimensions = new Map(
+    nextPayload.dimensions.map((dimension) => [dimension.key, dimension]),
+  );
+  if (
+    poseObjects.some((group) => !nextPoses.has(group.userData.pose.id)) ||
+    [...anchorObjects.keys()].some((key) => !nextDimensions.has(key))
+  ) {
+    throw new Error("Embedding versions do not describe the same pose space");
+  }
+
+  payload = nextPayload;
+  poseObjects.forEach((group) => {
+    const pose = nextPoses.get(group.userData.pose.id);
+    group.userData.pose = pose;
+    group.userData.basePosition.set(...pose.position);
+    group.userData.image.userData.pose = pose;
+    updatePoseScale(group);
+  });
+  anchorObjects.forEach((group, key) => {
+    const dimension = nextDimensions.get(key);
+    group.userData.dimension = dimension;
+    group.userData.basePosition.set(...dimension.position);
+    group.children[1].position
+      .set(...dimension.position)
+      .normalize()
+      .multiplyScalar(-0.78);
+  });
+  prepareRevealOrder();
+  updateSpatialLayout();
+  updateCountryColors();
+  updateCountryVisibility();
+  tooltip.classList.remove("is-visible");
+  canvas.classList.remove("is-pose-hovered");
+}
+
+async function switchEmbeddingVersion(version) {
+  if (version === state.embeddingVersion) return;
+  const previousVersion = state.embeddingVersion;
+  const generation = ++embeddingGeneration;
+  embeddingVersionInput.disabled = true;
+  setLoading(`Loading ${version.toUpperCase()} embedding…`);
+  try {
+    const nextPayload = await fetchEmbedding(version);
+    if (generation !== embeddingGeneration) return;
+    if (opening.active) finishOpeningScene();
+    if (exploration.active) exitExploration();
+    applyEmbeddingPayload(nextPayload);
+    state.embeddingVersion = version;
+    embeddingVersionInput.value = version;
+    document.body.dataset.embeddingVersion = version;
+    hideLoading();
+  } catch (error) {
+    console.error(error);
+    embeddingVersionInput.value = previousVersion;
+    loadingLabel.textContent = `Unable to load ${version.toUpperCase()}`;
+    window.setTimeout(hideLoading, 1600);
+  } finally {
+    if (generation === embeddingGeneration) embeddingVersionInput.disabled = false;
+  }
 }
 
 function createLabelTexture(label, color) {
@@ -557,6 +641,17 @@ function easeInOutCubic(value) {
 }
 
 function poseDistance(firstPose, secondPose) {
+  if (
+    Array.isArray(firstPose.featureVector) &&
+    Array.isArray(secondPose.featureVector) &&
+    firstPose.featureVector.length === secondPose.featureVector.length
+  ) {
+    const squaredDistance = firstPose.featureVector.reduce((total, value, index) => {
+      const difference = value - secondPose.featureVector[index];
+      return total + difference * difference;
+    }, 0);
+    return Math.sqrt(squaredDistance);
+  }
   const squaredDistance = payload.dimensions.reduce((total, dimension) => {
     const difference =
       (firstPose.normalized[dimension.key] - secondPose.normalized[dimension.key]) / 100;
@@ -1181,6 +1276,7 @@ async function loadTexture(path, mode) {
 
 async function loadPoseMode(mode) {
   const generation = ++textureGeneration;
+  embeddingVersionInput.disabled = true;
   state.mode = mode;
   displayModeInput.value = mode;
   exploreDisplayModeInput.value = mode;
@@ -1246,6 +1342,7 @@ async function loadPoseMode(mode) {
   if (generation === textureGeneration) {
     activeTextures = loadedTextures;
     hideLoading();
+    embeddingVersionInput.disabled = false;
   } else {
     loadedTextures.forEach((texture) => texture.dispose());
   }
@@ -1319,6 +1416,9 @@ function bindEvents() {
   });
 
   displayModeInput.addEventListener("change", () => loadPoseMode(displayModeInput.value));
+  embeddingVersionInput.addEventListener("change", () => {
+    switchEmbeddingVersion(embeddingVersionInput.value);
+  });
   exploreDisplayModeInput.addEventListener("change", () =>
     loadPoseMode(exploreDisplayModeInput.value),
   );
@@ -1423,10 +1523,12 @@ function bindEvents() {
 
 async function initialize() {
   try {
-    setLoading("Loading embedding…");
-    const response = await fetch(`${baseUrl}data/embedding.json`);
-    if (!response.ok) throw new Error(`Embedding request failed: ${response.status}`);
-    payload = await response.json();
+    embeddingVersionInput.disabled = true;
+    setLoading("Loading V1 embedding…");
+    payload = await fetchEmbedding("v1");
+    state.embeddingVersion = "v1";
+    embeddingVersionInput.value = "v1";
+    document.body.dataset.embeddingVersion = "v1";
 
     buildSettings();
     payload.poses.forEach(createPoseObject);

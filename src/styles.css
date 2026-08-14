@@ -218,6 +218,15 @@ select {
   font-size: 13px;
 }
 
+.embedding-version-control {
+  margin-bottom: 18px;
+}
+
+.embedding-version-control select:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
 .toggle-row,
 .section-heading,
 .range-heading,
