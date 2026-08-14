@@ -54,6 +54,58 @@ input:focus-visible {
   touch-action: none;
 }
 
+.presentation-button {
+  position: fixed;
+  z-index: 40;
+  top: 20px;
+  left: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 0 15px;
+  color: #f8f8f4;
+  background: rgba(15, 15, 15, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 12px;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.32);
+  backdrop-filter: blur(18px);
+  transition: background 180ms ease, border-color 180ms ease, opacity 180ms ease,
+    transform 180ms ease;
+}
+
+.presentation-button:hover:not(:disabled) {
+  background: rgba(30, 30, 30, 0.9);
+  border-color: rgba(255, 255, 255, 0.34);
+  transform: translateY(-1px);
+}
+
+.presentation-button:disabled {
+  cursor: wait;
+  opacity: 0.36;
+}
+
+body.presentation-active .presentation-button {
+  border-color: rgba(255, 255, 255, 0.36);
+}
+
+.presentation-blackout {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  visibility: hidden;
+  background: #000;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 260ms ease, visibility 260ms ease;
+}
+
+body.presentation-blackout-active .presentation-blackout {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .settings-button {
   position: fixed;
   z-index: 20;
@@ -642,6 +694,11 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 @media (max-width: 640px) {
+  .presentation-button {
+    top: 14px;
+    left: 14px;
+  }
+
   .settings-button,
   .random-button {
     top: 14px;

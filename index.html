@@ -16,6 +16,17 @@
       <canvas id="scene" aria-label="Interactive 3D pose embedding"></canvas>
 
       <button
+        class="presentation-button"
+        id="presentation-button"
+        type="button"
+        aria-pressed="false"
+        disabled
+      >
+        <span aria-hidden="true">□</span>
+        <span id="presentation-button-label">Presentation mode</span>
+      </button>
+
+      <button
         class="settings-button"
         id="settings-button"
         type="button"
@@ -245,6 +256,7 @@
       </div>
 
       <div class="tooltip" id="tooltip" aria-hidden="true"></div>
+      <div class="presentation-blackout" id="presentation-blackout" aria-hidden="true"></div>
     </main>
     <script type="module" src="/src/main.js"></script>
   </body>

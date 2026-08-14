@@ -1,8 +1,12 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import "./styles.css";
+import presentationOutlineMarkdown from "../presentation_outline.md?raw";
 
 const canvas = document.querySelector("#scene");
+const presentationButton = document.querySelector("#presentation-button");
+const presentationButtonLabel = document.querySelector("#presentation-button-label");
+const presentationBlackout = document.querySelector("#presentation-blackout");
 const settingsButton = document.querySelector("#settings-button");
 const settingsPanel = document.querySelector("#settings-panel");
 const closeSettingsButton = document.querySelector("#close-settings");
@@ -157,6 +161,17 @@ const exploration = {
   lineAnimationStart: 0,
   pointerDown: null,
 };
+
+const presentation = {
+  active: false,
+  busy: false,
+  index: -1,
+  slides: [],
+  fullscreenRequested: false,
+};
+
+const presentationHomePosition = new THREE.Vector3(0, 0.4, 22);
+const presentationHomeTarget = new THREE.Vector3(0, 0, 0);
 
 const cylinderAxis = new THREE.Vector3(0, 1, 0);
 const cylinderGeometry = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
@@ -852,7 +867,8 @@ function updateCameraTween(time) {
   return true;
 }
 
-function focusCameraOnGroups(groups) {
+function focusCameraOnGroups(groups, enableControlsAfter = exploration.active) {
+  if (groups.length === 0) return;
   const bounds = new THREE.Box3();
   groups.forEach((group) => bounds.expandByPoint(group.position));
   const target = bounds.getCenter(new THREE.Vector3());
@@ -870,7 +886,7 @@ function focusCameraOnGroups(groups) {
   );
   const endPosition = target.clone().addScaledVector(viewDirection, distance);
   startCameraTween(endPosition, target, () => {
-    controls.enabled = exploration.active;
+    controls.enabled = enableControlsAfter;
   });
 }
 
@@ -960,8 +976,11 @@ function applyComparison(mode) {
   focusCameraOnGroups([exploration.selectedGroup, ...relatedGroups]);
 }
 
-function exitExploration() {
+function exitExploration(options = {}) {
   if (!exploration.active) return;
+  const endPosition = options.cameraPosition || exploration.savedCameraPosition;
+  const endTarget = options.cameraTarget || exploration.savedCameraTarget;
+  const duration = options.duration ?? 850;
   exploration.active = false;
   exploration.restoring = true;
   exploration.selectedGroup = null;
@@ -984,8 +1003,8 @@ function exitExploration() {
   });
   controls.autoRotate = false;
   startCameraTween(
-    exploration.savedCameraPosition,
-    exploration.savedCameraTarget,
+    endPosition,
+    endTarget,
     () => {
       exploration.restoring = false;
       controls.enabled = true;
@@ -1008,7 +1027,7 @@ function exitExploration() {
         group.userData.label.material.opacity = countryVisible && state.poseLabels ? 0.86 : 0;
       });
     },
-    850,
+    duration,
   );
 }
 
@@ -1348,6 +1367,319 @@ async function loadPoseMode(mode) {
   }
 }
 
+function normalizePresentationToken(value) {
+  return String(value).toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function parsePresentationCommand(source) {
+  const nameMatch = source.match(/^([a-z ]+?)(?=[\[\{(]|$)/i);
+  const name = normalizePresentationToken(nameMatch?.[1] || source);
+  const argumentsList = [];
+  const argumentPattern = /\[([^\]]*)\]|\{([^}]*)\}|\(([^)]*)\)/g;
+  let match;
+  while ((match = argumentPattern.exec(source))) {
+    argumentsList.push(match[1] ?? match[2] ?? match[3] ?? "");
+  }
+  return { name, arguments: argumentsList, source };
+}
+
+function parsePresentationOutline(markdown) {
+  return markdown
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(">>"))
+    .map((line, index) => {
+      const source = line.slice(2).split("//", 1)[0].trim();
+      return {
+        index,
+        source,
+        commands: source
+          .split("/")
+          .map((command) => command.trim())
+          .filter(Boolean)
+          .map(parsePresentationCommand),
+      };
+    });
+}
+
+function resolvePresentationView(value) {
+  const views = {
+    bodytransparent: "bodyTransparent",
+    transparentbody: "bodyTransparent",
+    diagramonly: "diagram",
+    diagram: "diagram",
+    bodyonly: "body",
+    body: "body",
+    image: "body",
+    bodywithdiagram: "overlay",
+    imagewithdiagram: "overlay",
+    overlay: "overlay",
+  };
+  return views[normalizePresentationToken(value)] || null;
+}
+
+function resolvePresentationComparison(value) {
+  const comparisons = {
+    similar: "similar",
+    different: "different",
+    mostdifferent: "different",
+    similarallcountries: "similar-all-countries",
+    differentallcountries: "different-all-countries",
+    mostdifferentallcountries: "different-all-countries",
+    similarsamecountry: "similar-same-country",
+    similarsamecountries: "similar-same-country",
+    differentsamecountry: "different-same-country",
+    differentsamecountries: "different-same-country",
+    mostdifferentsamecountry: "different-same-country",
+    mostdifferentsamecountries: "different-same-country",
+  };
+  return comparisons[normalizePresentationToken(value)] || null;
+}
+
+function resolvePresentationCountry(value) {
+  const key = normalizePresentationToken(value);
+  if (key === "all" || key === "allcountries") return "all";
+  const aliases = {
+    brunei: "Brunei_Darussalam",
+    bruneidarussalam: "Brunei_Darussalam",
+    phllipines: "Philippines",
+  };
+  if (aliases[key] && payload.countryColors[aliases[key]]) return aliases[key];
+  return Object.keys(payload.countryColors).find(
+    (country) => normalizePresentationToken(country) === key,
+  ) || null;
+}
+
+function parsePresentationPose(value) {
+  const match = String(value).trim().match(/^(.+?)\s*\((\d+)\)$/);
+  if (!match) return null;
+  const country = resolvePresentationCountry(match[1]);
+  if (!country || country === "all") return null;
+  return {
+    country,
+    number: match[2].padStart(2, "0"),
+  };
+}
+
+function findPresentationPoseGroup(poseReference) {
+  if (!poseReference) return null;
+  return poseObjects.find(
+    (group) =>
+      group.userData.pose.country === poseReference.country &&
+      String(group.userData.pose.number).padStart(2, "0") === poseReference.number,
+  ) || null;
+}
+
+function compilePresentationState(slideIndex) {
+  const allCountries = Object.keys(payload.countryColors);
+  const target = {
+    mode: "bodyTransparent",
+    diagramOverlay: 0,
+    poseRotation: false,
+    poseRotationSpeed: Number(rotationSpeedInput.value),
+    visibleCountries: new Set(allCountries),
+    selectedPose: null,
+    comparisonMode: null,
+  };
+
+  for (let index = 0; index <= slideIndex; index += 1) {
+    presentation.slides[index].commands.forEach((command) => {
+      const firstArgument = command.arguments[0];
+      if (command.name === "view") {
+        target.mode = resolvePresentationView(firstArgument) || target.mode;
+      } else if (command.name === "diagramoverlay") {
+        target.diagramOverlay = THREE.MathUtils.clamp(Number(firstArgument), 0, 100);
+      } else if (command.name === "verticalrotation") {
+        target.poseRotation = Number(firstArgument) > 0;
+      } else if (command.name === "verticalrotationspeed") {
+        target.poseRotationSpeed = THREE.MathUtils.clamp(Number(firstArgument), 0.5, 720);
+      } else if (command.name === "goto") {
+        const poseReference = parsePresentationPose(firstArgument);
+        if (poseReference) {
+          target.selectedPose = poseReference;
+          target.comparisonMode = null;
+        }
+      } else if (command.name === "activate") {
+        target.comparisonMode =
+          resolvePresentationComparison(firstArgument) || target.comparisonMode;
+      } else if (command.name === "gotohome") {
+        target.selectedPose = null;
+        target.comparisonMode = null;
+      } else if (command.name === "hide") {
+        const country = resolvePresentationCountry(firstArgument);
+        if (country === "all") target.visibleCountries.clear();
+        else if (country) target.visibleCountries.delete(country);
+      } else if (command.name === "show") {
+        const country = resolvePresentationCountry(firstArgument);
+        if (country === "all") allCountries.forEach((name) => target.visibleCountries.add(name));
+        else if (country) target.visibleCountries.add(country);
+      }
+    });
+  }
+
+  const currentCommands = presentation.slides[slideIndex].commands;
+  const zoomCommand = currentCommands.find((command) => command.name === "zoominto");
+  return {
+    target,
+    effects: {
+      blackout: currentCommands.some((command) => command.name === "blackscreen"),
+      opening: currentCommands.some((command) => command.name === "opening"),
+      goHome: currentCommands.some((command) => command.name === "gotohome"),
+      zoomCountries: zoomCommand
+        ? zoomCommand.arguments.map(resolvePresentationCountry).filter((country) => country && country !== "all")
+        : [],
+    },
+  };
+}
+
+function setPresentationCountryVisibility(countries) {
+  state.visibleCountries.clear();
+  countries.forEach((country) => state.visibleCountries.add(country));
+  countryInputs.forEach((input, country) => {
+    input.checked = state.visibleCountries.has(country);
+  });
+  updateCountryVisibility();
+}
+
+function waitForPresentationTransition(milliseconds) {
+  if (reducedMotion) return new Promise((resolve) => window.setTimeout(resolve, 100));
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+}
+
+function goToPresentationHome() {
+  if (exploration.active) {
+    exitExploration({
+      cameraPosition: presentationHomePosition,
+      cameraTarget: presentationHomeTarget,
+      duration: 850,
+    });
+    return;
+  }
+  startCameraTween(
+    presentationHomePosition,
+    presentationHomeTarget,
+    () => {
+      controls.enabled = true;
+    },
+    850,
+  );
+}
+
+async function applyPresentationSlide(slideIndex) {
+  const { target, effects } = compilePresentationState(slideIndex);
+  document.body.classList.toggle("presentation-blackout-active", effects.blackout);
+  presentationBlackout.setAttribute("aria-hidden", String(!effects.blackout));
+
+  if (opening.active && !effects.opening) finishOpeningScene();
+  if (target.mode !== state.mode) await loadPoseMode(target.mode);
+  setDiagramOverlayOpacity(target.diagramOverlay);
+  state.poseRotationSpeed = target.poseRotationSpeed;
+  rotationSpeedInput.value = String(target.poseRotationSpeed);
+  rotationSpeedValue.value = `${target.poseRotationSpeed.toFixed(1).replace(".0", "")}°/s`;
+  setPresentationCountryVisibility(target.visibleCountries);
+
+  if (target.selectedPose) {
+    if (exploration.restoring) await waitForPresentationTransition(900);
+    const poseGroup = findPresentationPoseGroup(target.selectedPose);
+    if (!poseGroup) {
+      throw new Error(
+        `Presentation pose not found: ${target.selectedPose.country} ${target.selectedPose.number}`,
+      );
+    }
+    selectPose(poseGroup);
+    if (target.comparisonMode) applyComparison(target.comparisonMode);
+  } else if (exploration.active) {
+    if (effects.goHome) goToPresentationHome();
+    else exitExploration();
+    await waitForPresentationTransition(900);
+  } else if (effects.goHome) {
+    goToPresentationHome();
+  }
+
+  if (effects.opening) {
+    if (exploration.active) exitExploration();
+    startOpeningScene();
+  }
+  setPoseRotationEnabled(target.poseRotation, target.poseRotation);
+
+  if (effects.zoomCountries.length > 0) {
+    const zoomGroups = poseObjects.filter(
+      (group) =>
+        effects.zoomCountries.includes(group.userData.pose.country) &&
+        target.visibleCountries.has(group.userData.pose.country),
+    );
+    focusCameraOnGroups(zoomGroups, true);
+  }
+}
+
+function updatePresentationButton() {
+  presentationButton.setAttribute("aria-pressed", String(presentation.active));
+  presentationButtonLabel.textContent = presentation.active
+    ? `Exit presentation · ${presentation.index + 1}/${presentation.slides.length}`
+    : "Presentation mode";
+}
+
+async function navigatePresentation(slideIndex) {
+  if (!presentation.active || presentation.busy || presentation.slides.length === 0) return;
+  const boundedIndex = THREE.MathUtils.clamp(
+    slideIndex,
+    0,
+    presentation.slides.length - 1,
+  );
+  if (boundedIndex === presentation.index) return;
+  presentation.busy = true;
+  presentation.index = boundedIndex;
+  document.body.dataset.presentationStep = String(boundedIndex + 1);
+  updatePresentationButton();
+  try {
+    await applyPresentationSlide(boundedIndex);
+  } catch (error) {
+    console.error(error);
+    presentationButtonLabel.textContent = `Presentation error · ${boundedIndex + 1}`;
+  } finally {
+    presentation.busy = false;
+  }
+}
+
+async function enterPresentationMode() {
+  if (presentation.active || presentation.slides.length === 0) return;
+  presentation.active = true;
+  presentation.index = -1;
+  presentation.fullscreenRequested = true;
+  document.body.classList.add("presentation-active");
+  openSettings(false);
+  updatePresentationButton();
+
+  if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+    document.documentElement.requestFullscreen().catch((error) => {
+      console.warn("Fullscreen presentation was not available", error);
+    });
+  }
+  await navigatePresentation(0);
+}
+
+async function exitPresentationMode(exitFullscreen = true) {
+  if (!presentation.active) return;
+  presentation.active = false;
+  presentation.busy = false;
+  presentation.index = -1;
+  presentation.fullscreenRequested = false;
+  document.body.classList.remove("presentation-active", "presentation-blackout-active");
+  document.body.removeAttribute("data-presentation-step");
+  presentationBlackout.setAttribute("aria-hidden", "true");
+  updatePresentationButton();
+  if (exitFullscreen && document.fullscreenElement && document.exitFullscreen) {
+    await document.exitFullscreen().catch(() => {});
+  }
+}
+
+function isPresentationKeyboardTarget(target) {
+  return target instanceof HTMLInputElement ||
+    target instanceof HTMLSelectElement ||
+    target instanceof HTMLTextAreaElement ||
+    target?.isContentEditable;
+}
+
 function openSettings(open) {
   settingsPanel.classList.toggle("is-open", open);
   settingsPanel.setAttribute("aria-hidden", String(!open));
@@ -1401,6 +1733,10 @@ function updateTooltip(event) {
 }
 
 function bindEvents() {
+  presentationButton.addEventListener("click", () => {
+    if (presentation.active) exitPresentationMode();
+    else enterPresentationMode();
+  });
   settingsButton.addEventListener("click", () => openSettings(true));
   closeSettingsButton.addEventListener("click", () => openSettings(false));
   randomPoseButton.addEventListener("click", selectRandomPose);
@@ -1410,9 +1746,34 @@ function bindEvents() {
     button.addEventListener("click", () => applyComparison(button.dataset.comparison));
   });
   window.addEventListener("keydown", (event) => {
+    if (presentation.active && !isPresentationKeyboardTarget(event.target)) {
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        navigatePresentation(presentation.index + 1);
+        return;
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        navigatePresentation(presentation.index - 1);
+        return;
+      }
+      if (event.key === "Escape") {
+        exitPresentationMode();
+        return;
+      }
+    }
     if (event.key !== "Escape") return;
     if (exploration.active) exitExploration();
     else openSettings(false);
+  });
+  document.addEventListener("fullscreenchange", () => {
+    if (
+      presentation.active &&
+      presentation.fullscreenRequested &&
+      !document.fullscreenElement
+    ) {
+      exitPresentationMode(false);
+    }
   });
 
   displayModeInput.addEventListener("change", () => loadPoseMode(displayModeInput.value));
@@ -1529,6 +1890,10 @@ async function initialize() {
     state.embeddingVersion = "v1";
     embeddingVersionInput.value = "v1";
     document.body.dataset.embeddingVersion = "v1";
+    presentation.slides = parsePresentationOutline(presentationOutlineMarkdown);
+    if (presentation.slides.length === 0) {
+      throw new Error("presentation_outline.md contains no presentation steps");
+    }
 
     buildSettings();
     payload.poses.forEach(createPoseObject);
@@ -1545,6 +1910,8 @@ async function initialize() {
     });
     playOpeningButton.disabled = false;
     randomPoseButton.disabled = false;
+    presentationButton.disabled = false;
+    updatePresentationButton();
     document.body.dataset.opening = "idle";
   } catch (error) {
     console.error(error);
