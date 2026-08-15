@@ -176,6 +176,8 @@ const presentationHomeTarget = new THREE.Vector3(0, 0, 0);
 const cylinderAxis = new THREE.Vector3(0, 1, 0);
 const cylinderGeometry = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
 const curveSegments = 12;
+const connectionRadiusScale = 1.9;
+const comparisonConnectionRadius = 0.01125;
 const midpoint = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const quaternion = new THREE.Quaternion();
@@ -592,7 +594,10 @@ function updateConnections(revealWeights = null) {
       const pose = poseObject.userData.pose;
       const normalized = pose.normalized[dimension.key] / 100;
       const revealWeight = revealWeights ? revealWeights[index] : 1;
-      const radius = (0.0008 + Math.pow(normalized, 1.65) * 0.026) * revealWeight;
+      const radius =
+        (0.0008 + Math.pow(normalized, 1.65) * 0.026) *
+        connectionRadiusScale *
+        revealWeight;
       const visible = state.visibleCountries.has(pose.country) && revealWeight > 0.001;
       const instanceStart = index * curveSegments;
 
@@ -777,19 +782,11 @@ function clearComparisonLines() {
 function createComparisonLines(relatedGroups) {
   clearComparisonLines();
   const selectedPosition = exploration.selectedGroup.position;
-  const pointCount = 52;
+  const tubularSegments = 52;
   relatedGroups.forEach((group, index) => {
-    const points = [];
+    let curve;
     if (state.lineStyle === "straight") {
-      for (let pointIndex = 0; pointIndex < pointCount; pointIndex += 1) {
-        points.push(
-          new THREE.Vector3().lerpVectors(
-            selectedPosition,
-            group.position,
-            pointIndex / (pointCount - 1),
-          ),
-        );
-      }
+      curve = new THREE.LineCurve3(selectedPosition.clone(), group.position.clone());
     } else {
       const control = new THREE.Vector3()
         .addVectors(selectedPosition, group.position)
@@ -799,14 +796,23 @@ function createComparisonLines(relatedGroups) {
       radial.normalize();
       const connectionLength = selectedPosition.distanceTo(group.position);
       control.addScaledVector(radial, 0.3 + connectionLength * 0.13);
-      const curve = new THREE.QuadraticBezierCurve3(selectedPosition, control, group.position);
-      points.push(...curve.getPoints(pointCount - 1));
+      curve = new THREE.QuadraticBezierCurve3(
+        selectedPosition.clone(),
+        control,
+        group.position.clone(),
+      );
     }
 
-    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+    const geometry = new THREE.TubeGeometry(
+      curve,
+      tubularSegments,
+      comparisonConnectionRadius,
+      6,
+      false,
+    );
     geometry.setDrawRange(0, 0);
     const countryColor = payload.countryColors[group.userData.pose.country];
-    const material = new THREE.LineBasicMaterial({
+    const material = new THREE.MeshBasicMaterial({
       color: countryColor,
       transparent: true,
       opacity: 0,
@@ -815,9 +821,10 @@ function createComparisonLines(relatedGroups) {
       blending: THREE.AdditiveBlending,
       toneMapped: false,
     });
-    const line = new THREE.Line(geometry, material);
-    line.renderOrder = 16;
-    line.userData.pointCount = points.length;
+    const line = new THREE.Mesh(geometry, material);
+    line.renderOrder = 0;
+    line.frustumCulled = false;
+    line.userData.indexCount = geometry.index.count;
     line.userData.animationIndex = index;
     comparisonLineRoot.add(line);
     exploration.comparisonLines.push(line);
@@ -831,10 +838,13 @@ function updateComparisonLineAnimation(time) {
   exploration.comparisonLines.forEach((line) => {
     const delay = line.userData.animationIndex * 105;
     const progress = smoothstep((time - exploration.lineAnimationStart - delay) / 900);
-    const visiblePoints = progress <= 0
+    const visibleIndices = progress <= 0
       ? 0
-      : Math.max(2, Math.ceil(line.userData.pointCount * progress));
-    line.geometry.setDrawRange(0, visiblePoints);
+      : Math.max(
+          36,
+          Math.floor((line.userData.indexCount * progress) / 6) * 6,
+        );
+    line.geometry.setDrawRange(0, visibleIndices);
     line.material.opacity = progress * 0.82;
   });
 }
@@ -1834,6 +1844,9 @@ function bindEvents() {
   lineStyleInput.addEventListener("change", () => {
     state.lineStyle = lineStyleInput.value;
     updateConnections();
+    if (exploration.active && exploration.relatedGroups.size > 0) {
+      createComparisonLines([...exploration.relatedGroups]);
+    }
   });
   lineOpacityInput.addEventListener("input", () => {
     state.lineOpacity = Number(lineOpacityInput.value);
