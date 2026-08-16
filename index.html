@@ -26,6 +26,20 @@
         <span id="presentation-button-label">Presentation mode</span>
       </button>
 
+      <div
+        class="presentation-title"
+        id="presentation-title"
+        role="status"
+        aria-live="polite"
+        aria-hidden="true"
+      >
+        <span class="presentation-title__label" id="presentation-title-label"></span>
+        <small
+          class="presentation-title__description"
+          id="presentation-title-description"
+        ></small>
+      </div>
+
       <button
         class="settings-button"
         id="settings-button"
@@ -107,6 +121,20 @@
                 value="3"
                 step="0.5"
                 disabled
+              />
+            </div>
+            <div class="transition-time-control">
+              <div class="range-heading">
+                <label class="control-label" for="transition-time">Transition time</label>
+                <output id="transition-time-value" for="transition-time">2.5 s</output>
+              </div>
+              <input
+                id="transition-time"
+                type="range"
+                min="0.25"
+                max="6"
+                value="2.5"
+                step="0.25"
               />
             </div>
             <label class="toggle-row" for="show-pose-labels">

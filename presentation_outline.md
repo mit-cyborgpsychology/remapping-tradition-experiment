@@ -19,9 +19,8 @@ Each line beginning with `>>` is one presentation step. Commands separated by `/
 >>Activate[DifferentSameCountries]
 >>Activate[DifferentAllCountries]
 >>GotoHome/View[BodyTransparent]
->>Hide[AllCountries]
->>Show[Thailand]
->>Show[Indonesia]
->>Zoominto[Thailand][Indonesia]
->>Show[Brunei]/Zoominto[Thailand][Indonesia][Brunei]
->>Show{AllCountries}
+>>Hide[AllCountries]/Duration(1)
+>>Show[Thailand]/MapRotation(1)/MapRotationSpeed(1)
+>>Show[Indonesia]/MapRotation(1)/MapRotationSpeed(1)
+>>Show[Brunei]/Zoominto[Thailand][Indonesia][Brunei]/MapRotation(1)/MapRotationSpeed(1)
+>>GotoHome/Show[AllCountries]/MapRotation(1)/MapRotationSpeed(1)

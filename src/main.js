@@ -6,6 +6,9 @@ import presentationOutlineMarkdown from "../presentation_outline.md?raw";
 const canvas = document.querySelector("#scene");
 const presentationButton = document.querySelector("#presentation-button");
 const presentationButtonLabel = document.querySelector("#presentation-button-label");
+const presentationTitle = document.querySelector("#presentation-title");
+const presentationTitleLabel = document.querySelector("#presentation-title-label");
+const presentationTitleDescription = document.querySelector("#presentation-title-description");
 const presentationBlackout = document.querySelector("#presentation-blackout");
 const settingsButton = document.querySelector("#settings-button");
 const settingsPanel = document.querySelector("#settings-panel");
@@ -20,6 +23,8 @@ const autoRotateInput = document.querySelector("#auto-rotate");
 const poseRotationInput = document.querySelector("#pose-rotation");
 const rotationSpeedInput = document.querySelector("#rotation-speed");
 const rotationSpeedValue = document.querySelector("#rotation-speed-value");
+const transitionTimeInput = document.querySelector("#transition-time");
+const transitionTimeValue = document.querySelector("#transition-time-value");
 const poseLabelsInput = document.querySelector("#show-pose-labels");
 const poseLabelSizeInput = document.querySelector("#pose-label-size");
 const poseLabelSizeValue = document.querySelector("#pose-label-size-value");
@@ -57,13 +62,6 @@ const embeddingFiles = {
   v2: "data/embedding-v2.json",
   v3: "data/embedding-v3.json",
 };
-const modeLabels = {
-  overlay: "body + diagram",
-  diagram: "diagram",
-  body: "body",
-  bodyTransparent: "transparent body",
-};
-
 const state = {
   embeddingVersion: "v1",
   mode: "bodyTransparent",
@@ -73,6 +71,7 @@ const state = {
   countryColors: countryColorsInput.checked,
   poseRotation: poseRotationInput.checked,
   poseRotationSpeed: Number(rotationSpeedInput.value),
+  transitionTime: Number(transitionTimeInput.value),
   poseLabels: poseLabelsInput.checked,
   poseLabelScale: Number(poseLabelSizeInput.value),
   linesVisible: showLinesInput.checked,
@@ -128,8 +127,7 @@ const countryInputs = new Map();
 const dimensionInputs = new Map();
 let payload;
 let embeddingGeneration = 0;
-let textureGeneration = 0;
-let activeTextures = [];
+const preloadedTextures = [];
 let lastPoseRotationTime = null;
 let lastFrameTime = performance.now();
 
@@ -168,16 +166,47 @@ const presentation = {
   index: -1,
   slides: [],
   fullscreenRequested: false,
+  countryTransitioning: false,
+  countryTransitionGeneration: 0,
+  countryTransitionDuration: 2.5,
+  navigationGeneration: 0,
+  mapRotation: false,
+  savedAutoRotate: false,
+  modeTransitioning: false,
+  modeTransitionTarget: null,
+  modeTransitionDestination: null,
+  modeTransitionGeneration: 0,
 };
 
-const presentationHomePosition = new THREE.Vector3(0, 0.4, 22);
+const openingFinalOrbitAngle =
+  Math.atan2(opening.cameraStart.x, opening.cameraStart.z) -
+  (opening.duration / 1000) * opening.cameraOrbitSpeed;
+const openingFinalCameraRadius = Math.hypot(opening.cameraEnd.x, opening.cameraEnd.z);
+const presentationHomePosition = new THREE.Vector3(
+  Math.sin(openingFinalOrbitAngle) * openingFinalCameraRadius,
+  opening.cameraEnd.y,
+  Math.cos(openingFinalOrbitAngle) * openingFinalCameraRadius,
+);
 const presentationHomeTarget = new THREE.Vector3(0, 0, 0);
+const presentationComparisonTitles = {
+  similar: "Similar Dances Across the Collection",
+  different: "Most Different Dances Across the Collection",
+  "similar-all-countries": "Similar Dances from Every Country",
+  "different-all-countries": "Most Different Dances from Every Country",
+  "similar-same-country": "Similar Dances Within {country}",
+  "different-same-country": "Most Different Dances Within {country}",
+};
 
 const cylinderAxis = new THREE.Vector3(0, 1, 0);
 const cylinderGeometry = new THREE.CylinderGeometry(1, 1, 1, 6, 1, true);
 const curveSegments = 12;
 const connectionRadiusScale = 1.9;
 const comparisonConnectionRadius = 0.01125;
+const poseModeFadeDuration = 500;
+const poseModeMaximumStagger = 750;
+const poseLabelScaleStartDistance = 14;
+const poseLabelScaleExponent = 0.55;
+const poseLabelMinimumScale = 0.38;
 const midpoint = new THREE.Vector3();
 const direction = new THREE.Vector3();
 const quaternion = new THREE.Quaternion();
@@ -188,6 +217,8 @@ const curvePointA = new THREE.Vector3();
 const curvePointB = new THREE.Vector3();
 const curveRadial = new THREE.Vector3();
 const curveNormal = new THREE.Vector3();
+const poseLabelWorldPosition = new THREE.Vector3();
+const poseTransitionWorldPosition = new THREE.Vector3();
 
 function setLoading(message, progress = null) {
   loading.classList.remove("is-hidden");
@@ -303,17 +334,22 @@ function createLabelTexture(label, color) {
 
 function createPoseLabelTexture(label) {
   const labelCanvas = document.createElement("canvas");
-  labelCanvas.width = 512;
+  const font = '400 58px "Helvetica Neue", Helvetica, Arial, sans-serif';
+  const horizontalPadding = 64;
+  const measurementContext = labelCanvas.getContext("2d");
+  measurementContext.font = font;
+  const measuredWidth = Math.ceil(measurementContext.measureText(label).width);
+  labelCanvas.width = Math.max(512, measuredWidth + horizontalPadding * 2);
   labelCanvas.height = 96;
   const context = labelCanvas.getContext("2d");
   context.clearRect(0, 0, labelCanvas.width, labelCanvas.height);
-  context.font = '400 58px "Helvetica Neue", Helvetica, Arial, sans-serif';
+  context.font = font;
   context.textAlign = "center";
   context.textBaseline = "middle";
   context.fillStyle = "#ffffff";
   context.shadowColor = "rgba(0, 0, 0, 0.95)";
   context.shadowBlur = 14;
-  context.fillText(label, 256, 48);
+  context.fillText(label, labelCanvas.width * 0.5, labelCanvas.height * 0.5);
   const texture = new THREE.CanvasTexture(labelCanvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.minFilter = THREE.LinearFilter;
@@ -330,6 +366,9 @@ function createPoseObject(pose) {
   group.userData.targetOpacity = 1;
   group.userData.visualScale = 1;
   group.userData.targetScale = 1;
+  group.userData.modeTransitionDelay = 0;
+  group.userData.modeTransitionStartProgress = 0;
+  group.userData.modeTransitionProgress = 0;
   group.userData.rotationStart =
     (((poseIndex * 0.61803398875) % 1) - 0.5) * 1.4;
   group.userData.rotationDirection = 1;
@@ -365,7 +404,20 @@ function createPoseObject(pose) {
   diagramOverlay.position.z = 0.002;
   diagramOverlay.renderOrder = 2;
   image.add(diagramOverlay);
-  billboard.add(image);
+
+  const transitionImage = new THREE.Mesh(posePlaneGeometry, imageMaterial.clone());
+  transitionImage.position.z = 0.004;
+  transitionImage.renderOrder = 2;
+  transitionImage.visible = false;
+  transitionImage.raycast = () => {};
+  const transitionDiagramOverlay = new THREE.Mesh(
+    posePlaneGeometry,
+    diagramOverlay.material.clone(),
+  );
+  transitionDiagramOverlay.position.z = 0.002;
+  transitionDiagramOverlay.renderOrder = 3;
+  transitionImage.add(transitionDiagramOverlay);
+  billboard.add(image, transitionImage);
 
   const poseLabelText = `${pose.countryLabel} · ${pose.number}`;
   const poseLabel = new THREE.Sprite(
@@ -386,6 +438,8 @@ function createPoseObject(pose) {
   group.userData.billboard = billboard;
   group.userData.image = image;
   group.userData.diagramOverlay = diagramOverlay;
+  group.userData.transitionImage = transitionImage;
+  group.userData.transitionDiagramOverlay = transitionDiagramOverlay;
   group.userData.label = poseLabel;
   group.userData.labelText = poseLabelText;
   poseRoot.add(group);
@@ -395,18 +449,32 @@ function createPoseObject(pose) {
   return group;
 }
 
-function updatePoseScale(group) {
+function updatePoseLayerScale(group, image, mode) {
   const pose = group.userData.pose;
-  const aspect = pose.aspect[state.mode] || 1;
+  const aspect = pose.aspect[mode] || 1;
   const height = 0.72 * state.poseScale;
-  const width = height * aspect;
-  group.userData.image.scale.set(width, height, 1);
+  image.scale.set(height * aspect, height, 1);
+  return height;
+}
+
+function updatePoseScale(group) {
+  const height = updatePoseLayerScale(group, group.userData.image, state.mode);
+  if (presentation.modeTransitioning && presentation.modeTransitionTarget) {
+    updatePoseLayerScale(
+      group,
+      group.userData.transitionImage,
+      presentation.modeTransitionTarget,
+    );
+  }
   const labelWidth = THREE.MathUtils.clamp(
     0.28 + group.userData.labelText.length * 0.045,
     0.78,
     1.56,
   ) * state.poseScale * state.poseLabelScale;
   const labelHeight = 0.19 * state.poseScale * state.poseLabelScale;
+  group.userData.labelBaseWidth = labelWidth;
+  group.userData.labelBaseHeight = labelHeight;
+  group.userData.imageBaseHeight = height;
   group.userData.label.scale.set(labelWidth, labelHeight, 1);
   group.userData.label.position.set(
     0,
@@ -415,46 +483,85 @@ function updatePoseScale(group) {
   );
 }
 
-function updatePoseAppearance(group) {
+function updateAdaptivePoseLabels() {
+  poseObjects.forEach((group) => {
+    group.getWorldPosition(poseLabelWorldPosition);
+    const distance = camera.position.distanceTo(poseLabelWorldPosition);
+    const distanceRatio = Math.min(1, distance / poseLabelScaleStartDistance);
+    const cameraScale = Math.max(
+      poseLabelMinimumScale,
+      Math.pow(distanceRatio, poseLabelScaleExponent),
+    );
+    const visualScale = Math.max(group.userData.visualScale || 1, 0.001);
+    const localScale = cameraScale / visualScale;
+    const labelWidth = group.userData.labelBaseWidth * localScale;
+    const labelHeight = group.userData.labelBaseHeight * localScale;
+
+    group.userData.label.scale.set(labelWidth, labelHeight, 1);
+    group.userData.label.position.set(
+      0,
+      -group.userData.imageBaseHeight * 0.5
+        - labelHeight * 0.58
+        - (0.012 * state.poseScale) / visualScale,
+      0,
+    );
+  });
+}
+
+function updatePoseLayerAppearance(group, image, diagramOverlay, mode) {
   const pose = group.userData.pose;
-  const material = group.userData.image.material;
+  const material = image.material;
   const brightness = {
     body: 1.35,
     bodyTransparent: 1.55,
     overlay: 1.75,
     diagram: 2.8,
-  }[state.mode];
+  }[mode];
   const color = state.countryColors
     ? new THREE.Color(payload.countryColors[pose.country])
     : new THREE.Color(1, 1, 1);
   if (state.countryColors) {
     color.offsetHSL(
       0,
-      state.mode === "body" || state.mode === "bodyTransparent" ? 0.08 : 0.24,
-      state.mode === "diagram" ? 0.03 : 0,
+      mode === "body" || mode === "bodyTransparent" ? 0.08 : 0.24,
+      mode === "diagram" ? 0.03 : 0,
     );
   }
   material.color.copy(color.multiplyScalar(brightness));
-  material.blending = state.mode === "diagram" ? THREE.AdditiveBlending : THREE.NormalBlending;
-  material.opacity = material.map ? group.userData.visualOpacity : 0;
+  material.blending = mode === "diagram" ? THREE.AdditiveBlending : THREE.NormalBlending;
   material.needsUpdate = true;
 
-  const diagramMaterial = group.userData.diagramOverlay.material;
+  const diagramMaterial = diagramOverlay.material;
   const diagramColor = state.countryColors
     ? new THREE.Color(payload.countryColors[pose.country]).offsetHSL(0, 0.24, 0.03)
     : new THREE.Color(1, 1, 1);
   diagramMaterial.color.copy(diagramColor.multiplyScalar(2.8));
-  diagramMaterial.opacity =
-    state.mode === "bodyTransparent" && diagramMaterial.map
-      ? state.diagramOverlayOpacity * group.userData.visualOpacity
-      : 0;
   diagramMaterial.needsUpdate = true;
+}
 
+function updatePoseAppearance(group) {
+  updatePoseLayerAppearance(
+    group,
+    group.userData.image,
+    group.userData.diagramOverlay,
+    state.mode,
+  );
+  if (presentation.modeTransitioning && presentation.modeTransitionTarget) {
+    updatePoseLayerAppearance(
+      group,
+      group.userData.transitionImage,
+      group.userData.transitionDiagramOverlay,
+      presentation.modeTransitionTarget,
+    );
+  }
+
+  const pose = group.userData.pose;
   const labelColor = state.countryColors
     ? new THREE.Color(payload.countryColors[pose.country]).offsetHSL(0, 0.04, 0.22)
     : new THREE.Color(0xf2f2ed);
   group.userData.label.material.color.copy(labelColor);
   group.userData.label.material.needsUpdate = true;
+  applyPoseVisualOpacity(group, group.userData.visualOpacity);
 }
 
 function updateDiagramOverlayControls() {
@@ -472,12 +579,7 @@ function setDiagramOverlayOpacity(percent) {
   exploreDiagramOverlayInput.value = String(boundedPercent);
   diagramOverlayValue.value = `${Math.round(boundedPercent)}%`;
   exploreDiagramOverlayValue.value = `${Math.round(boundedPercent)}%`;
-  poseObjects.forEach((group) => {
-    group.userData.diagramOverlay.material.opacity =
-      state.mode === "bodyTransparent" && group.userData.diagramOverlay.material.map
-        ? state.diagramOverlayOpacity * group.userData.visualOpacity
-        : 0;
-  });
+  poseObjects.forEach((group) => applyPoseVisualOpacity(group, group.userData.visualOpacity));
 }
 
 function updatePoseLabelVisibility() {
@@ -734,12 +836,48 @@ function setPoseProminence(group, level = 0) {
   group.userData.image.material.depthTest = level === 0;
   group.userData.image.material.needsUpdate = true;
   group.userData.diagramOverlay.renderOrder = level === 2 ? 12 : level === 1 ? 11 : 2;
+  group.userData.transitionImage.renderOrder = level === 2 ? 12 : level === 1 ? 11 : 2;
+  group.userData.transitionImage.material.depthTest = level === 0;
+  group.userData.transitionImage.material.needsUpdate = true;
+  group.userData.transitionDiagramOverlay.renderOrder =
+    level === 2 ? 13 : level === 1 ? 12 : 3;
   group.userData.label.renderOrder = level === 2 ? 14 : level === 1 ? 13 : 4;
 }
 
+function applyPoseLayerOpacity(image, diagramOverlay, mode, opacity) {
+  image.material.opacity = image.material.map ? opacity : 0;
+  diagramOverlay.material.opacity =
+    mode === "bodyTransparent" && diagramOverlay.material.map
+      ? opacity * state.diagramOverlayOpacity
+      : 0;
+}
+
+function applyPoseVisualOpacity(group, opacity) {
+  const transitionProgress = presentation.modeTransitioning
+    ? group.userData.modeTransitionProgress
+    : 0;
+  applyPoseLayerOpacity(
+    group.userData.image,
+    group.userData.diagramOverlay,
+    state.mode,
+    opacity * (1 - transitionProgress),
+  );
+  applyPoseLayerOpacity(
+    group.userData.transitionImage,
+    group.userData.transitionDiagramOverlay,
+    presentation.modeTransitionTarget,
+    opacity * transitionProgress,
+  );
+  group.userData.label.material.opacity = state.poseLabels ? opacity * 0.86 : 0;
+}
+
 function updatePoseTransitions(deltaSeconds) {
-  if (!exploration.active && !exploration.restoring) return;
-  const transitionSpeed = exploration.restoring ? 6.5 : 4.6;
+  if (!exploration.active && !exploration.restoring && !presentation.countryTransitioning) return;
+  const activeTransitionTime = presentation.countryTransitioning
+    ? presentation.countryTransitionDuration
+    : state.transitionTime;
+  const timingScale = 1.25 / activeTransitionTime;
+  const transitionSpeed = (exploration.restoring ? 6.5 : 4.6) * timingScale;
   const response = 1 - Math.exp(-deltaSeconds * (reducedMotion ? 40 : transitionSpeed));
   poseObjects.forEach((group) => {
     group.userData.visualOpacity = THREE.MathUtils.lerp(
@@ -753,16 +891,7 @@ function updatePoseTransitions(deltaSeconds) {
       response,
     );
     group.scale.setScalar(group.userData.visualScale);
-    group.userData.image.material.opacity = group.userData.image.material.map
-      ? group.userData.visualOpacity
-      : 0;
-    group.userData.diagramOverlay.material.opacity =
-      state.mode === "bodyTransparent" && group.userData.diagramOverlay.material.map
-        ? group.userData.visualOpacity * state.diagramOverlayOpacity
-        : 0;
-    group.userData.label.material.opacity = state.poseLabels
-      ? group.userData.visualOpacity * 0.86
-      : 0;
+    applyPoseVisualOpacity(group, group.userData.visualOpacity);
     if (group.userData.targetOpacity === 0 && group.userData.visualOpacity < 0.002) {
       group.visible = false;
     }
@@ -830,14 +959,16 @@ function createComparisonLines(relatedGroups) {
     exploration.comparisonLines.push(line);
   });
   comparisonLineRoot.visible = true;
-  exploration.lineAnimationStart = performance.now() + 120;
+  exploration.lineAnimationStart = performance.now() + state.transitionTime * 96;
 }
 
 function updateComparisonLineAnimation(time) {
   if (!exploration.active || exploration.comparisonLines.length === 0) return;
+  const duration = state.transitionTime * 720;
+  const stagger = state.transitionTime * 84;
   exploration.comparisonLines.forEach((line) => {
-    const delay = line.userData.animationIndex * 105;
-    const progress = smoothstep((time - exploration.lineAnimationStart - delay) / 900);
+    const delay = line.userData.animationIndex * stagger;
+    const progress = smoothstep((time - exploration.lineAnimationStart - delay) / duration);
     const visibleIndices = progress <= 0
       ? 0
       : Math.max(
@@ -849,7 +980,12 @@ function updateComparisonLineAnimation(time) {
   });
 }
 
-function startCameraTween(endPosition, endTarget, onComplete = null, duration = 1250) {
+function startCameraTween(
+  endPosition,
+  endTarget,
+  onComplete = null,
+  duration = state.transitionTime * 1000,
+) {
   controls.enabled = false;
   exploration.cameraTween = {
     startTime: performance.now(),
@@ -858,6 +994,8 @@ function startCameraTween(endPosition, endTarget, onComplete = null, duration = 
     endPosition: endPosition.clone(),
     startTarget: controls.target.clone(),
     endTarget: endTarget.clone(),
+    lastTime: performance.now(),
+    orbitAngle: 0,
     onComplete,
   };
 }
@@ -869,6 +1007,16 @@ function updateCameraTween(time) {
   const easedProgress = easeInOutCubic(progress);
   camera.position.lerpVectors(tween.startPosition, tween.endPosition, easedProgress);
   controls.target.lerpVectors(tween.startTarget, tween.endTarget, easedProgress);
+  const elapsedSeconds = Math.max(0, time - tween.lastTime) / 1000;
+  tween.lastTime = time;
+  if (controls.autoRotate) {
+    tween.orbitAngle -=
+      elapsedSeconds * (Math.PI * 2 / 60) * controls.autoRotateSpeed;
+    camera.position
+      .sub(controls.target)
+      .applyAxisAngle(cylinderAxis, tween.orbitAngle)
+      .add(controls.target);
+  }
   camera.lookAt(controls.target);
   if (progress >= 1) {
     exploration.cameraTween = null;
@@ -877,8 +1025,13 @@ function updateCameraTween(time) {
   return true;
 }
 
-function focusCameraOnGroups(groups, enableControlsAfter = exploration.active) {
-  if (groups.length === 0) return;
+function calculateCameraFrame(groups, frontFacing = false) {
+  if (groups.length === 0) {
+    return {
+      position: presentationHomePosition.clone(),
+      target: presentationHomeTarget.clone(),
+    };
+  }
   const bounds = new THREE.Box3();
   groups.forEach((group) => bounds.expandByPoint(group.position));
   const target = bounds.getCenter(new THREE.Vector3());
@@ -886,16 +1039,29 @@ function focusCameraOnGroups(groups, enableControlsAfter = exploration.active) {
     (largest, group) => Math.max(largest, group.position.distanceTo(target)),
     0,
   );
-  const viewDirection = camera.position.clone().sub(controls.target);
+  const viewDirection = frontFacing
+    ? new THREE.Vector3(0, 0, 1)
+    : camera.position.clone().sub(controls.target);
   if (viewDirection.lengthSq() < 1e-6) viewDirection.set(0, 0, 1);
   viewDirection.normalize();
+  const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+  const horizontalFov = 2 * Math.atan(Math.tan(verticalFov * 0.5) * camera.aspect);
+  const fitFov = Math.min(verticalFov, horizontalFov);
   const distance = THREE.MathUtils.clamp(
-    Math.max(4.4, (radius / Math.tan(THREE.MathUtils.degToRad(camera.fov * 0.5))) * 1.18),
+    Math.max(4.4, (radius / Math.tan(fitFov * 0.5)) * 1.22),
     4.4,
-    52,
+    58,
   );
-  const endPosition = target.clone().addScaledVector(viewDirection, distance);
-  startCameraTween(endPosition, target, () => {
+  return {
+    position: target.clone().addScaledVector(viewDirection, distance),
+    target,
+  };
+}
+
+function focusCameraOnGroups(groups, enableControlsAfter = exploration.active) {
+  if (groups.length === 0) return;
+  const frame = calculateCameraFrame(groups);
+  startCameraTween(frame.position, frame.target, () => {
     controls.enabled = enableControlsAfter;
   });
 }
@@ -908,10 +1074,55 @@ function resetComparisonPresentation() {
     button.classList.remove("is-active");
     button.setAttribute("aria-pressed", "false");
   });
+  updatePresentationComparisonTitle(null);
+}
+
+function setPresentationTitle(title = "", description = "") {
+  const visible = presentation.active && Boolean(title);
+  presentationTitleLabel.textContent = visible ? title : "";
+  presentationTitleDescription.textContent = visible ? description : "";
+  presentationTitle.classList.toggle("is-visible", visible);
+  presentationTitle.setAttribute("aria-hidden", String(!visible));
+}
+
+function updatePresentationComparisonTitle(mode, count = 0) {
+  const country = exploration.selectedGroup?.userData.pose.countryLabel || "Selected Country";
+  const titleTemplate = presentation.active && mode
+    ? presentationComparisonTitles[mode] || ""
+    : "";
+  const title = titleTemplate.replace("{country}", country);
+  const description = title ? comparisonStatus(mode, count) : "";
+  setPresentationTitle(title, description);
+}
+
+function formatPresentationCountryList(countryNames) {
+  if (countryNames.length <= 1) return countryNames[0] || "";
+  if (countryNames.length === 2) return `${countryNames[0]} and ${countryNames[1]}`;
+  return `${countryNames.slice(0, -1).join(", ")}, and ${countryNames.at(-1)}`;
+}
+
+function updatePresentationCountryTitle(countries) {
+  const countryNames = [...countries].map((country) => country.replaceAll("_", " "));
+  if (countryNames.length === 0) {
+    setPresentationTitle();
+    return;
+  }
+  if (countryNames.length === Object.keys(payload.countryColors).length) {
+    setPresentationTitle(
+      "All Countries",
+      "Returning to the complete regional dance pose space",
+    );
+    return;
+  }
+  const description = countryNames.length === 1
+    ? `Revealing traditional dance poses from ${countryNames[0]}`
+    : `Comparing traditional dance poses from ${formatPresentationCountryList(countryNames)}`;
+  setPresentationTitle(countryNames.join(" + "), description);
 }
 
 function selectPose(group) {
-  if (!group || opening.active || exploration.restoring) return;
+  if (!group || opening.active) return;
+  if (exploration.restoring) exploration.restoring = false;
   if (!exploration.active) {
     exploration.savedCameraPosition.copy(camera.position);
     exploration.savedCameraTarget.copy(controls.target);
@@ -974,7 +1185,7 @@ function applyComparison(mode) {
     const countryVisible = state.visibleCountries.has(group.userData.pose.country);
     setPoseTarget(
       group,
-      relevant ? 1 : countryVisible ? 0.025 : 0,
+      relevant ? 1 : countryVisible ? 0.1 : 0,
       selected ? 1.5 : related ? 2 : 0.92,
     );
     setPoseProminence(group, selected ? 2 : related ? 1 : 0);
@@ -983,6 +1194,7 @@ function applyComparison(mode) {
   anchorRoot.visible = false;
   createComparisonLines(relatedGroups);
   exploreStatus.textContent = comparisonStatus(mode, relatedGroups.length);
+  updatePresentationComparisonTitle(mode, relatedGroups.length);
   focusCameraOnGroups([exploration.selectedGroup, ...relatedGroups]);
 }
 
@@ -990,12 +1202,13 @@ function exitExploration(options = {}) {
   if (!exploration.active) return;
   const endPosition = options.cameraPosition || exploration.savedCameraPosition;
   const endTarget = options.cameraTarget || exploration.savedCameraTarget;
-  const duration = options.duration ?? 850;
+  const duration = options.duration ?? state.transitionTime * 1000;
   exploration.active = false;
   exploration.restoring = true;
   exploration.selectedGroup = null;
   exploration.relatedGroups = new Set();
   exploration.comparisonMode = null;
+  updatePresentationComparisonTitle(null);
   document.body.classList.remove("explore-active");
   explorePanel.classList.remove("is-open");
   explorePanel.setAttribute("aria-hidden", "true");
@@ -1018,7 +1231,10 @@ function exitExploration(options = {}) {
     () => {
       exploration.restoring = false;
       controls.enabled = true;
-      controls.autoRotate = exploration.savedAutoRotate;
+      controls.autoRotate = presentation.active
+        ? presentation.mapRotation
+        : exploration.savedAutoRotate;
+      if (presentation.countryTransitioning) return;
       poseObjects.forEach((group) => {
         const countryVisible = state.visibleCountries.has(group.userData.pose.country);
         group.userData.visualOpacity = countryVisible ? 1 : 0;
@@ -1136,7 +1352,11 @@ function finishOpeningScene() {
 function updateOpeningScene(time) {
   const progress = clamp01((time - opening.startTime) / opening.duration);
   const cameraProgress = easeInOutCubic(progress);
-  const orbitElapsed = Math.max(0, time - opening.startTime) / 1000;
+  const orbitElapsed = THREE.MathUtils.clamp(
+    (time - opening.startTime) / 1000,
+    0,
+    opening.duration / 1000,
+  );
   const orbitAngle = opening.cameraOrbitStartAngle - orbitElapsed * opening.cameraOrbitSpeed;
   const cameraRadius = THREE.MathUtils.lerp(
     Math.hypot(opening.cameraStart.x, opening.cameraStart.z),
@@ -1186,8 +1406,9 @@ function updatePoseRotations(timeSeconds) {
   const radiansPerSecond = THREE.MathUtils.degToRad(state.poseRotationSpeed);
   poseObjects.forEach((group) => {
     // Turn each camera-facing image like a vertical card around its local Y axis.
-    group.userData.image.rotation.y +=
-      elapsed * radiansPerSecond * group.userData.rotationDirection;
+    const rotationDelta = elapsed * radiansPerSecond * group.userData.rotationDirection;
+    group.userData.image.rotation.y += rotationDelta;
+    group.userData.transitionImage.rotation.y = group.userData.image.rotation.y;
   });
   lastPoseRotationTime = timeSeconds;
 }
@@ -1195,6 +1416,7 @@ function updatePoseRotations(timeSeconds) {
 function resetPoseRotations() {
   poseObjects.forEach((group) => {
     group.userData.image.rotation.set(0, 0, 0);
+    group.userData.transitionImage.rotation.set(0, 0, 0);
   });
 }
 
@@ -1210,6 +1432,7 @@ function setPoseRotationEnabled(enabled, resetPhase = false) {
   if (resetPhase) {
     poseObjects.forEach((group) => {
       group.userData.image.rotation.set(0, group.userData.rotationStart, 0);
+      group.userData.transitionImage.rotation.copy(group.userData.image.rotation);
     });
   }
 }
@@ -1232,7 +1455,13 @@ function updateSpatialLayout() {
 
 function updateCountryVisibility() {
   poseObjects.forEach((group) => {
-    group.visible = state.visibleCountries.has(group.userData.pose.country);
+    const visible = state.visibleCountries.has(group.userData.pose.country);
+    group.visible = visible;
+    if (!exploration.active && !exploration.restoring && !presentation.countryTransitioning) {
+      group.userData.visualOpacity = visible ? 1 : 0;
+      group.userData.targetOpacity = visible ? 1 : 0;
+      applyPoseVisualOpacity(group, visible ? 1 : 0);
+    }
   });
   const allVisible = state.visibleCountries.size === Object.keys(payload.countryColors).length;
   toggleCountriesButton.textContent = allVisible ? "Hide all" : "Show all";
@@ -1303,78 +1532,209 @@ async function loadTexture(path, mode) {
   return texture;
 }
 
-async function loadPoseMode(mode) {
-  const generation = ++textureGeneration;
-  embeddingVersionInput.disabled = true;
+function updatePoseModeControls(mode) {
+  displayModeInput.value = mode;
+  exploreDisplayModeInput.value = mode;
+  const previousMode = state.mode;
+  state.mode = mode;
+  updateDiagramOverlayControls();
+  state.mode = previousMode;
+}
+
+function configurePoseLayer(group, image, diagramOverlay, mode) {
+  const textures = group.userData.modeTextures || {};
+  image.material.map = textures[mode] || null;
+  image.material.needsUpdate = true;
+  diagramOverlay.material.map = mode === "bodyTransparent" ? textures.diagram || null : null;
+  diagramOverlay.material.needsUpdate = true;
+  updatePoseLayerScale(group, image, mode);
+  updatePoseLayerAppearance(group, image, diagramOverlay, mode);
+}
+
+function clearPoseModeTransition() {
+  presentation.modeTransitioning = false;
+  presentation.modeTransitionTarget = null;
+  poseObjects.forEach((group) => {
+    const transitionImage = group.userData.transitionImage;
+    const transitionDiagramOverlay = group.userData.transitionDiagramOverlay;
+    transitionImage.visible = false;
+    transitionImage.material.opacity = 0;
+    transitionDiagramOverlay.material.opacity = 0;
+    group.userData.modeTransitionDelay = 0;
+    group.userData.modeTransitionStartProgress = 0;
+    group.userData.modeTransitionProgress = 0;
+    applyPoseVisualOpacity(group, group.userData.visualOpacity);
+  });
+  presentation.modeTransitionDestination = null;
+}
+
+function activatePoseMode(mode) {
   state.mode = mode;
   displayModeInput.value = mode;
   exploreDisplayModeInput.value = mode;
   updateDiagramOverlayControls();
-  setLoading(`Loading ${modeLabels[mode]}…`, 0);
+  clearPoseModeTransition();
 
   poseObjects.forEach((group) => {
-    group.userData.image.material.map = null;
-    group.userData.image.material.opacity = 0;
-    group.userData.image.material.needsUpdate = true;
-    group.userData.diagramOverlay.material.map = null;
-    group.userData.diagramOverlay.material.opacity = 0;
-    group.userData.diagramOverlay.material.needsUpdate = true;
+    configurePoseLayer(
+      group,
+      group.userData.image,
+      group.userData.diagramOverlay,
+      mode,
+    );
     updatePoseScale(group);
     updatePoseAppearance(group);
   });
-  activeTextures.forEach((texture) => texture.dispose());
-  activeTextures = [];
+}
+
+async function preloadPoseTextures() {
+  embeddingVersionInput.disabled = true;
+  const modes = ["body", "bodyTransparent", "overlay", "diagram"];
+  const totalTextures = poseObjects.length * modes.length;
+  setLoading("Preloading all display styles…", 0);
 
   let cursor = 0;
-  let completed = 0;
-  const loadedTextures = [];
+  let completedTextures = 0;
   const workerCount = 12;
 
   async function worker() {
-    while (cursor < poseObjects.length && generation === textureGeneration) {
+    while (cursor < poseObjects.length) {
       const index = cursor++;
       const group = poseObjects[index];
       const pose = group.userData.pose;
-      try {
-        const textureRequests = [loadTexture(pose.assets[mode], mode)];
-        if (mode === "bodyTransparent") {
-          textureRequests.push(loadTexture(pose.assets.diagram, "diagram"));
+      const results = await Promise.allSettled(
+        modes.map((mode) => loadTexture(pose.assets[mode], mode)),
+      );
+      group.userData.modeTextures = {};
+      results.forEach((result, modeIndex) => {
+        const mode = modes[modeIndex];
+        if (result.status === "fulfilled") {
+          group.userData.modeTextures[mode] = result.value;
+          preloadedTextures.push(result.value);
+        } else {
+          console.error(`Could not preload ${pose.id} (${mode})`, result.reason);
         }
-        const results = await Promise.allSettled(textureRequests);
-        const textures = results
-          .filter((result) => result.status === "fulfilled")
-          .map((result) => result.value);
-        if (generation !== textureGeneration) {
-          textures.forEach((texture) => texture.dispose());
-          return;
-        }
-        loadedTextures.push(...textures);
-        if (results[0].status === "rejected") throw results[0].reason;
-        group.userData.image.material.map = results[0].value;
-        if (mode === "bodyTransparent" && results[1]?.status === "fulfilled") {
-          group.userData.diagramOverlay.material.map = results[1].value;
-        } else if (results[1]?.status === "rejected") {
-          console.warn(`Could not load diagram overlay for ${pose.id}`, results[1].reason);
-        }
-        updatePoseAppearance(group);
-      } catch (error) {
-        console.error(`Could not load ${pose.id} (${mode})`, error);
-      }
-      completed += 1;
-      if (completed % 12 === 0 || completed === poseObjects.length) {
-        setLoading(`Loading ${modeLabels[mode]}…`, Math.round((completed / poseObjects.length) * 100));
+        completedTextures += 1;
+      });
+      if (completedTextures % 48 === 0 || completedTextures === totalTextures) {
+        setLoading(
+          "Preloading all display styles…",
+          Math.round((completedTextures / totalTextures) * 100),
+        );
       }
     }
   }
 
   await Promise.all(Array.from({ length: workerCount }, worker));
-  if (generation === textureGeneration) {
-    activeTextures = loadedTextures;
-    hideLoading();
-    embeddingVersionInput.disabled = false;
-  } else {
-    loadedTextures.forEach((texture) => texture.dispose());
+  activatePoseMode(state.mode);
+  hideLoading();
+  embeddingVersionInput.disabled = false;
+}
+
+async function loadPoseMode(mode) {
+  if (mode === state.mode) return;
+  activatePoseMode(mode);
+}
+
+async function transitionPresentationPoseMode(mode) {
+  if (mode === state.mode && !presentation.modeTransitioning) return;
+  if (!presentation.active || reducedMotion) {
+    presentation.modeTransitionGeneration += 1;
+    activatePoseMode(mode);
+    return;
   }
+
+  const existingTarget = presentation.modeTransitionTarget;
+  if (presentation.modeTransitioning && mode === presentation.modeTransitionDestination) return;
+
+  const generation = ++presentation.modeTransitionGeneration;
+  const reversing = presentation.modeTransitioning && mode === state.mode;
+  if (presentation.modeTransitioning && !reversing) {
+    const averageProgress = poseObjects.reduce(
+      (total, group) => total + group.userData.modeTransitionProgress,
+      0,
+    ) / Math.max(poseObjects.length, 1);
+    activatePoseMode(averageProgress >= 0.5 ? existingTarget : state.mode);
+    if (mode === state.mode) {
+      updatePoseModeControls(mode);
+      return;
+    }
+  }
+
+  presentation.modeTransitioning = true;
+  presentation.modeTransitionTarget = reversing ? existingTarget : mode;
+  presentation.modeTransitionDestination = mode;
+  updatePoseModeControls(mode);
+
+  const screenDistances = poseObjects.map((group) => {
+    group.getWorldPosition(poseTransitionWorldPosition);
+    poseTransitionWorldPosition.project(camera);
+    return Math.hypot(poseTransitionWorldPosition.x, poseTransitionWorldPosition.y);
+  });
+  const minimumScreenDistance = Math.min(...screenDistances);
+  const maximumScreenDistance = Math.max(...screenDistances);
+  const screenDistanceRange = Math.max(maximumScreenDistance - minimumScreenDistance, 0.0001);
+
+  poseObjects.forEach((group, index) => {
+    group.userData.modeTransitionDelay =
+      ((screenDistances[index] - minimumScreenDistance) / screenDistanceRange) *
+      poseModeMaximumStagger;
+    group.userData.modeTransitionStartProgress = reversing
+      ? group.userData.modeTransitionProgress
+      : 0;
+    if (!reversing) {
+      group.userData.modeTransitionProgress = 0;
+      configurePoseLayer(
+        group,
+        group.userData.transitionImage,
+        group.userData.transitionDiagramOverlay,
+        mode,
+      );
+    }
+    group.userData.transitionImage.visible = group.visible;
+    applyPoseVisualOpacity(group, group.userData.visualOpacity);
+  });
+
+  const completed = await new Promise((resolve) => {
+    const startTime = performance.now();
+    function updateCrossfade(time) {
+      if (generation !== presentation.modeTransitionGeneration) {
+        resolve(false);
+        return;
+      }
+      const elapsed = time - startTime;
+      let transitionComplete = true;
+      poseObjects.forEach((group) => {
+        const localProgress = clamp01(
+          (elapsed - group.userData.modeTransitionDelay) / poseModeFadeDuration,
+        );
+        group.userData.modeTransitionProgress = THREE.MathUtils.lerp(
+          group.userData.modeTransitionStartProgress,
+          reversing ? 0 : 1,
+          easeInOutCubic(localProgress),
+        );
+        if (localProgress < 1) transitionComplete = false;
+        group.userData.transitionImage.visible = group.visible;
+        applyPoseVisualOpacity(group, group.userData.visualOpacity);
+      });
+      if (!transitionComplete) {
+        window.requestAnimationFrame(updateCrossfade);
+      } else {
+        resolve(true);
+      }
+    }
+    window.requestAnimationFrame(updateCrossfade);
+  });
+
+  if (completed && generation === presentation.modeTransitionGeneration) {
+    activatePoseMode(mode);
+  }
+}
+
+function changePoseMode(mode) {
+  return presentation.active
+    ? transitionPresentationPoseMode(mode)
+    : loadPoseMode(mode);
 }
 
 function normalizePresentationToken(value) {
@@ -1487,6 +1847,8 @@ function compilePresentationState(slideIndex) {
     diagramOverlay: 0,
     poseRotation: false,
     poseRotationSpeed: Number(rotationSpeedInput.value),
+    mapRotation: false,
+    mapRotationSpeed: controls.autoRotateSpeed,
     visibleCountries: new Set(allCountries),
     selectedPose: null,
     comparisonMode: null,
@@ -1503,6 +1865,13 @@ function compilePresentationState(slideIndex) {
         target.poseRotation = Number(firstArgument) > 0;
       } else if (command.name === "verticalrotationspeed") {
         target.poseRotationSpeed = THREE.MathUtils.clamp(Number(firstArgument), 0.5, 720);
+      } else if (command.name === "maprotation" || command.name === "camerarotation") {
+        target.mapRotation = Number(firstArgument) > 0;
+      } else if (
+        command.name === "maprotationspeed" ||
+        command.name === "camerarotationspeed"
+      ) {
+        target.mapRotationSpeed = THREE.MathUtils.clamp(Number(firstArgument), 0.1, 20);
       } else if (command.name === "goto") {
         const poseReference = parsePresentationPose(firstArgument);
         if (poseReference) {
@@ -1529,12 +1898,27 @@ function compilePresentationState(slideIndex) {
 
   const currentCommands = presentation.slides[slideIndex].commands;
   const zoomCommand = currentCommands.find((command) => command.name === "zoominto");
+  const durationCommand = currentCommands.find(
+    (command) => command.name === "duration" || command.name === "transitionduration",
+  );
+  const showCommands = currentCommands.filter((command) => command.name === "show");
   return {
     target,
     effects: {
       blackout: currentCommands.some((command) => command.name === "blackscreen"),
       opening: currentCommands.some((command) => command.name === "opening"),
       goHome: currentCommands.some((command) => command.name === "gotohome"),
+      poseRotationChanged: currentCommands.some(
+        (command) => command.name === "verticalrotation",
+      ),
+      transitionDuration: durationCommand
+        ? THREE.MathUtils.clamp(Number(durationCommand.arguments[0]), 0.1, 30) * 1000
+        : state.transitionTime * 1000,
+      countryVisibilityChanged: currentCommands.some(
+        (command) => command.name === "show" || command.name === "hide",
+      ),
+      showCountries: showCommands.flatMap((command) =>
+        command.arguments.map(resolvePresentationCountry).filter(Boolean)),
       zoomCountries: zoomCommand
         ? zoomCommand.arguments.map(resolvePresentationCountry).filter((country) => country && country !== "all")
         : [],
@@ -1542,37 +1926,94 @@ function compilePresentationState(slideIndex) {
   };
 }
 
-function setPresentationCountryVisibility(countries) {
+async function setPresentationCountryVisibility(
+  countries,
+  animate = presentation.active,
+  duration = state.transitionTime * 1000,
+) {
+  const sameTarget =
+    countries.size === state.visibleCountries.size &&
+    [...countries].every((country) => state.visibleCountries.has(country));
+  if (!animate && sameTarget) return;
+
+  const generation = ++presentation.countryTransitionGeneration;
   state.visibleCountries.clear();
   countries.forEach((country) => state.visibleCountries.add(country));
   countryInputs.forEach((input, country) => {
     input.checked = state.visibleCountries.has(country);
   });
-  updateCountryVisibility();
+  const allVisible = state.visibleCountries.size === Object.keys(payload.countryColors).length;
+  toggleCountriesButton.textContent = allVisible ? "Hide all" : "Show all";
+  const visibilityChanged = poseObjects.some((group) => {
+    const targetOpacity = state.visibleCountries.has(group.userData.pose.country) ? 1 : 0;
+    return Math.abs(group.userData.targetOpacity - targetOpacity) > 0.001;
+  });
+
+  if (!animate || reducedMotion || !visibilityChanged || exploration.active) {
+    if (generation === presentation.countryTransitionGeneration) {
+      presentation.countryTransitioning = false;
+    }
+    updateCountryVisibility();
+    return;
+  }
+
+  presentation.countryTransitioning = true;
+  presentation.countryTransitionDuration = duration / 1000;
+  poseObjects.forEach((group) => {
+    const country = group.userData.pose.country;
+    const targetVisible = state.visibleCountries.has(country);
+    if (targetVisible && !group.visible) {
+      group.visible = true;
+      applyPoseVisualOpacity(group, group.userData.visualOpacity);
+    }
+    setPoseTarget(group, targetVisible ? 1 : 0, 1);
+    setPoseProminence(group, 0);
+  });
+  updateConnections();
+
+  await waitForPresentationTransition(duration);
+  if (generation !== presentation.countryTransitionGeneration) return;
+  poseObjects.forEach((group) => {
+    const targetVisible = state.visibleCountries.has(group.userData.pose.country);
+    group.userData.visualOpacity = targetVisible ? 1 : 0;
+    group.userData.targetOpacity = targetVisible ? 1 : 0;
+    group.userData.visualScale = 1;
+    group.userData.targetScale = 1;
+    group.scale.setScalar(1);
+    group.visible = targetVisible;
+    applyPoseVisualOpacity(group, targetVisible ? 1 : 0);
+  });
+  presentation.countryTransitioning = false;
+  updateConnections();
 }
 
-function waitForPresentationTransition(milliseconds) {
+function waitForPresentationTransition(milliseconds = state.transitionTime * 1000) {
   if (reducedMotion) return new Promise((resolve) => window.setTimeout(resolve, 100));
   return new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 }
 
 function goToPresentationHome() {
+  const frame = {
+    position: presentationHomePosition.clone(),
+    target: presentationHomeTarget.clone(),
+  };
   if (exploration.active) {
     exitExploration({
-      cameraPosition: presentationHomePosition,
-      cameraTarget: presentationHomeTarget,
-      duration: 850,
+      cameraPosition: frame.position,
+      cameraTarget: frame.target,
+      duration: state.transitionTime * 1000,
     });
-    return;
+    return waitForPresentationTransition();
   }
   startCameraTween(
-    presentationHomePosition,
-    presentationHomeTarget,
+    frame.position,
+    frame.target,
     () => {
       controls.enabled = true;
     },
-    850,
+    state.transitionTime * 1000,
   );
+  return waitForPresentationTransition();
 }
 
 async function applyPresentationSlide(slideIndex) {
@@ -1581,36 +2022,63 @@ async function applyPresentationSlide(slideIndex) {
   presentationBlackout.setAttribute("aria-hidden", String(!effects.blackout));
 
   if (opening.active && !effects.opening) finishOpeningScene();
-  if (target.mode !== state.mode) await loadPoseMode(target.mode);
+  if (effects.goHome || (!target.comparisonMode && effects.showCountries.length === 0)) {
+    setPresentationTitle();
+  }
+
+  const transitionTasks = [];
+  if (target.mode !== state.mode || presentation.modeTransitioning) {
+    transitionTasks.push(changePoseMode(target.mode));
+  }
   setDiagramOverlayOpacity(target.diagramOverlay);
   state.poseRotationSpeed = target.poseRotationSpeed;
   rotationSpeedInput.value = String(target.poseRotationSpeed);
   rotationSpeedValue.value = `${target.poseRotationSpeed.toFixed(1).replace(".0", "")}°/s`;
-  setPresentationCountryVisibility(target.visibleCountries);
+  transitionTasks.push(
+    setPresentationCountryVisibility(
+      target.visibleCountries,
+      effects.countryVisibilityChanged,
+      effects.transitionDuration,
+    ),
+  );
+
+  if (effects.showCountries.length > 0 && !effects.goHome) {
+    updatePresentationCountryTitle(target.visibleCountries);
+  }
 
   if (target.selectedPose) {
-    if (exploration.restoring) await waitForPresentationTransition(900);
-    const poseGroup = findPresentationPoseGroup(target.selectedPose);
-    if (!poseGroup) {
-      throw new Error(
-        `Presentation pose not found: ${target.selectedPose.country} ${target.selectedPose.number}`,
-      );
-    }
-    selectPose(poseGroup);
-    if (target.comparisonMode) applyComparison(target.comparisonMode);
+    transitionTasks.push((async () => {
+      const poseGroup = findPresentationPoseGroup(target.selectedPose);
+      if (!poseGroup) {
+        throw new Error(
+          `Presentation pose not found: ${target.selectedPose.country} ${target.selectedPose.number}`,
+        );
+      }
+      selectPose(poseGroup);
+      if (target.comparisonMode) applyComparison(target.comparisonMode);
+    })());
   } else if (exploration.active) {
-    if (effects.goHome) goToPresentationHome();
-    else exitExploration();
-    await waitForPresentationTransition(900);
+    if (effects.goHome) transitionTasks.push(goToPresentationHome());
+    else {
+      exitExploration();
+      transitionTasks.push(waitForPresentationTransition());
+    }
   } else if (effects.goHome) {
-    goToPresentationHome();
+    transitionTasks.push(goToPresentationHome());
   }
 
   if (effects.opening) {
     if (exploration.active) exitExploration();
     startOpeningScene();
   }
-  setPoseRotationEnabled(target.poseRotation, target.poseRotation);
+  setPoseRotationEnabled(
+    target.poseRotation,
+    effects.poseRotationChanged && target.poseRotation && !state.poseRotation,
+  );
+  presentation.mapRotation = target.mapRotation && !reducedMotion;
+  controls.autoRotateSpeed = target.mapRotationSpeed;
+  controls.autoRotate = presentation.mapRotation;
+  autoRotateInput.checked = controls.autoRotate;
 
   if (effects.zoomCountries.length > 0) {
     const zoomGroups = poseObjects.filter(
@@ -1619,7 +2087,10 @@ async function applyPresentationSlide(slideIndex) {
         target.visibleCountries.has(group.userData.pose.country),
     );
     focusCameraOnGroups(zoomGroups, true);
+    transitionTasks.push(waitForPresentationTransition());
   }
+
+  await Promise.all(transitionTasks);
 }
 
 function updatePresentationButton() {
@@ -1630,13 +2101,14 @@ function updatePresentationButton() {
 }
 
 async function navigatePresentation(slideIndex) {
-  if (!presentation.active || presentation.busy || presentation.slides.length === 0) return;
+  if (!presentation.active || presentation.slides.length === 0) return;
   const boundedIndex = THREE.MathUtils.clamp(
     slideIndex,
     0,
     presentation.slides.length - 1,
   );
   if (boundedIndex === presentation.index) return;
+  const generation = ++presentation.navigationGeneration;
   presentation.busy = true;
   presentation.index = boundedIndex;
   document.body.dataset.presentationStep = String(boundedIndex + 1);
@@ -1647,16 +2119,23 @@ async function navigatePresentation(slideIndex) {
     console.error(error);
     presentationButtonLabel.textContent = `Presentation error · ${boundedIndex + 1}`;
   } finally {
-    presentation.busy = false;
+    if (generation === presentation.navigationGeneration) presentation.busy = false;
   }
+}
+
+function stepPresentation(direction) {
+  navigatePresentation(presentation.index + direction);
 }
 
 async function enterPresentationMode() {
   if (presentation.active || presentation.slides.length === 0) return;
   presentation.active = true;
+  presentation.navigationGeneration += 1;
+  presentation.savedAutoRotate = controls.autoRotate;
   presentation.index = -1;
   presentation.fullscreenRequested = true;
   document.body.classList.add("presentation-active");
+  updatePresentationComparisonTitle(null);
   openSettings(false);
   updatePresentationButton();
 
@@ -1672,11 +2151,23 @@ async function exitPresentationMode(exitFullscreen = true) {
   if (!presentation.active) return;
   presentation.active = false;
   presentation.busy = false;
+  presentation.navigationGeneration += 1;
+  presentation.countryTransitionGeneration += 1;
+  presentation.mapRotation = false;
+  controls.autoRotate = presentation.savedAutoRotate;
+  autoRotateInput.checked = controls.autoRotate;
   presentation.index = -1;
   presentation.fullscreenRequested = false;
   document.body.classList.remove("presentation-active", "presentation-blackout-active");
   document.body.removeAttribute("data-presentation-step");
   presentationBlackout.setAttribute("aria-hidden", "true");
+  presentation.modeTransitionGeneration += 1;
+  clearPoseModeTransition();
+  displayModeInput.value = state.mode;
+  exploreDisplayModeInput.value = state.mode;
+  updateDiagramOverlayControls();
+  presentation.countryTransitioning = false;
+  updatePresentationComparisonTitle(null);
   updatePresentationButton();
   if (exitFullscreen && document.fullscreenElement && document.exitFullscreen) {
     await document.exitFullscreen().catch(() => {});
@@ -1759,12 +2250,12 @@ function bindEvents() {
     if (presentation.active && !isPresentationKeyboardTarget(event.target)) {
       if (event.key === "ArrowRight") {
         event.preventDefault();
-        navigatePresentation(presentation.index + 1);
+        stepPresentation(1);
         return;
       }
       if (event.key === "ArrowLeft") {
         event.preventDefault();
-        navigatePresentation(presentation.index - 1);
+        stepPresentation(-1);
         return;
       }
       if (event.key === "Escape") {
@@ -1786,12 +2277,12 @@ function bindEvents() {
     }
   });
 
-  displayModeInput.addEventListener("change", () => loadPoseMode(displayModeInput.value));
+  displayModeInput.addEventListener("change", () => changePoseMode(displayModeInput.value));
   embeddingVersionInput.addEventListener("change", () => {
     switchEmbeddingVersion(embeddingVersionInput.value);
   });
   exploreDisplayModeInput.addEventListener("change", () =>
-    loadPoseMode(exploreDisplayModeInput.value),
+    changePoseMode(exploreDisplayModeInput.value),
   );
   diagramOverlayInput.addEventListener("input", () => {
     setDiagramOverlayOpacity(diagramOverlayInput.value);
@@ -1812,6 +2303,14 @@ function bindEvents() {
   rotationSpeedInput.addEventListener("input", () => {
     state.poseRotationSpeed = Number(rotationSpeedInput.value);
     rotationSpeedValue.value = `${state.poseRotationSpeed.toFixed(1).replace(".0", "")}°/s`;
+  });
+  transitionTimeInput.addEventListener("input", () => {
+    state.transitionTime = Number(transitionTimeInput.value);
+    const formattedTime = state.transitionTime
+      .toFixed(2)
+      .replace(/0+$/, "")
+      .replace(/\.$/, "");
+    transitionTimeValue.value = `${formattedTime} s`;
   });
   poseLabelsInput.addEventListener("change", () => {
     state.poseLabels = poseLabelsInput.checked;
@@ -1917,7 +2416,7 @@ async function initialize() {
     bindEvents();
     updateDiagramOverlayControls();
     setDiagramOverlayOpacity(diagramOverlayInput.value);
-    await loadPoseMode(state.mode);
+    await preloadPoseTextures();
     poseObjects.forEach((group) => {
       group.userData.label.material.opacity = state.poseLabels ? 0.86 : 0;
     });
@@ -1945,6 +2444,7 @@ renderer.setAnimationLoop(() => {
   }
   updateComparisonLineAnimation(now);
   updateImageBillboards();
+  updateAdaptivePoseLabels();
   updatePoseRotations(now / 1000);
   renderer.render(scene, camera);
 });

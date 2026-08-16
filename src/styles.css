@@ -86,7 +86,66 @@ input:focus-visible {
 }
 
 body.presentation-active .presentation-button {
-  border-color: rgba(255, 255, 255, 0.36);
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-8px);
+}
+
+.presentation-title {
+  position: fixed;
+  z-index: 45;
+  top: 24px;
+  left: 50%;
+  width: min(1200px, calc(100vw - 48px));
+  margin: 0;
+  color: #f8f8f4;
+  text-align: center;
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(-50%, -8px);
+  transition: left 220ms ease, opacity 180ms ease, transform 220ms ease,
+    visibility 180ms ease;
+}
+
+.presentation-title__label,
+.presentation-title__description {
+  display: block;
+}
+
+.presentation-title__label {
+  font-size: clamp(20px, 2.2vw, 34px);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.presentation-title__description {
+  margin-top: 9px;
+  color: rgba(248, 248, 244, 0.82);
+  font-size: clamp(16px, 1.25vw, 21px);
+  font-weight: 400;
+  letter-spacing: 0;
+  line-height: 1.35;
+}
+
+body.presentation-active.explore-active .presentation-title {
+  right: 354px;
+  left: 20px;
+  width: auto;
+  transform: translateY(-8px);
+}
+
+body.presentation-active .presentation-title.is-visible {
+  visibility: visible;
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+body.presentation-active.explore-active .presentation-title.is-visible {
+  transform: translateY(0);
 }
 
 .presentation-blackout {
@@ -300,6 +359,7 @@ select {
 }
 
 .rotation-speed-control,
+.transition-time-control,
 .pose-label-size-control,
 .diagram-overlay-control {
   margin: 2px 0 9px;
@@ -697,6 +757,23 @@ input[type="range"]::-webkit-slider-thumb {
   .presentation-button {
     top: 14px;
     left: 14px;
+  }
+
+  .presentation-title,
+  body.presentation-active.explore-active .presentation-title {
+    top: 70px;
+    right: auto;
+    left: 50%;
+    width: calc(100vw - 28px);
+    transform: translate(-50%, -8px);
+  }
+
+  body.presentation-active.explore-active .presentation-title.is-visible {
+    transform: translate(-50%, 0);
+  }
+
+  .presentation-title__label {
+    font-size: 20px;
   }
 
   .settings-button,
